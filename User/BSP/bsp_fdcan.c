@@ -596,10 +596,6 @@ void CAN_cmd_CHAS_3508(int16_t motor1, int16_t motor2, int16_t motor3, int16_t m
 	canx_send_data(&hfdcan1, 0x200U, data, 8U);
 }
 
-void CAN_cmd_CHAS_6020(int16_t motor5, int16_t motor6, int16_t motor7, int16_t motor8)
-{
-	CAN_cmd_CHASSIS_ALL(motor5, motor6, motor7, motor8);
-}
 
 void CAN_cmd_CHASSIS_ALL(int16_t motor205, int16_t motor206, int16_t motor207, int16_t motor208)
 {
