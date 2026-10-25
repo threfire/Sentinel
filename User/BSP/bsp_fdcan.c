@@ -157,7 +157,7 @@ static inline int8_t get_mit_motor_index(uint32_t can_id)
     switch(can_id)
     {
         case DM_STRUM_MASTER_ID: return 0;
-        case DM_YAW_MASTER_ID: return 1;
+        case DM_BIG_YAW_MASTER_ID: return 1;
         case DM_ROLL_MASTER_ID: return 2;
         case DM_PIT_MASTER_ID: return 3;
         default: return -1;
@@ -168,6 +168,7 @@ static inline int8_t get_dji_motor_index(uint32_t can_id)
 {
     switch(can_id)
     {
+        case CAN_SMALL_YAW_ID: return 3;
         case CAN_FRIC1_ID: return 0;
         case CAN_FRIC2_ID: return 1;
         case CAN_FRIC3_ID: return 2;
@@ -330,9 +331,7 @@ uint8_t fdcan1_receive(hcan_t *hfdcan, uint16_t *rec_id, uint8_t *buf)
 
 		switch (pRxHeader.Identifier)
 		{
-			case DM_YAW_MASTER_ID:
-			case DM_STRUM_MASTER_ID:
-			case DM_ROLL_MASTER_ID:
+			case DM_BIG_YAW_MASTER_ID:
 			{
 				int8_t motor_index = get_mit_motor_index(pRxHeader.Identifier);
 				if(motor_index < 0 || motor_index >= 5)
@@ -343,7 +342,7 @@ uint8_t fdcan1_receive(hcan_t *hfdcan, uint16_t *rec_id, uint8_t *buf)
 				can1_cnt = (uint8_t)motor_index;
 				MITFdbData(&MIT_MOTOR_MEASURE[can1_cnt], buf, can1_cnt);
 				MIT_MOTOR_MEASURE[can1_cnt].fdb.last_fdb_time = fdb_time;
-				if (pRxHeader.Identifier == DM_YAW_MASTER_ID)
+				if (pRxHeader.Identifier == DM_BIG_YAW_MASTER_ID)
 				{
 					detect_hook(YAW_GIMBAL_MOTOR_TOE);
 				}
@@ -414,19 +413,37 @@ uint8_t fdcan2_receive(hcan_t *hfdcan, uint16_t *rec_id, uint8_t *buf)
 
 		switch (pRxHeader.Identifier)
 		{
+			case DM_STRUM_MASTER_ID:
+			case DM_ROLL_MASTER_ID:
 			case DM_PIT_MASTER_ID:
 			{
-				//get motor id
 				int8_t motor_index = get_mit_motor_index(pRxHeader.Identifier);
 				if(motor_index < 0 || motor_index >= 5)
 				{
 					return len;
 				}
 
-				can1_cnt = (uint8_t)motor_index;
-				MITFdbData(&MIT_MOTOR_MEASURE[can1_cnt], buf, can1_cnt);
-				MIT_MOTOR_MEASURE[can1_cnt].fdb.last_fdb_time = fdb_time;
-				detect_hook(PITCH_GIMBAL_MOTOR_TOE);
+				can2_cnt = (uint8_t)motor_index;
+				MITFdbData(&MIT_MOTOR_MEASURE[can2_cnt], buf, can2_cnt);
+				MIT_MOTOR_MEASURE[can2_cnt].fdb.last_fdb_time = fdb_time;
+				if (pRxHeader.Identifier == DM_PIT_MASTER_ID)
+				{
+					detect_hook(PITCH_GIMBAL_MOTOR_TOE);
+				}
+				else if (pRxHeader.Identifier == DM_ROLL_MASTER_ID)
+				{
+					detect_hook(ROLL_GIMBAL_MOTOR_TOE);
+				}
+				else
+				{
+					detect_hook(PLUCK_MOTOR_TOE);
+				}
+				break;
+			}
+			case CAN_SMALL_YAW_ID:
+			{
+				get_motor_measure(&DJI_MOTOR_MEASURE[3], buf);
+				DJI_MOTOR_MEASURE[3].last_fdb_time = fdb_time;
 				break;
 			}
 			case CAN_FRIC1_ID:
@@ -464,11 +481,24 @@ uint8_t fdcan3_receive(hcan_t *hfdcan, uint16_t *rec_id, uint8_t *buf)
 
 	if(HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &pRxHeader, buf) == HAL_OK)
 	{
-		*rec_id = (uint16_t)(pRxHeader.Identifier >> 8);
+		*rec_id = (uint16_t)pRxHeader.Identifier;
 
 		len = fdcan_dlc_to_len(pRxHeader.DataLength);
 		if(len > 8) {
 			len = 8;
+		}
+
+		if (pRxHeader.Identifier == CAN_FRIC1_ID ||
+			pRxHeader.Identifier == CAN_FRIC2_ID ||
+			pRxHeader.Identifier == CAN_FRIC3_ID)
+		{
+			int8_t motor_index = get_dji_motor_index(pRxHeader.Identifier);
+			if (motor_index >= 0)
+			{
+				get_motor_measure(&DJI_MOTOR_MEASURE[motor_index], buf);
+				DJI_MOTOR_MEASURE[motor_index].last_fdb_time = HAL_GetTick();
+				detect_hook((uint8_t)(FRIC1_MOTOR_TOE + motor_index));
+			}
 		}
 
 		return len;

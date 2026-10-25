@@ -1034,9 +1034,10 @@ __attribute__((used)) void gimbal_init(gimbal_control_t *control)
     control->gimbal_pitch_motor.inertia_kgm2 = PITCH_INERTIA_KGM2;
 		
 //		Motor_MIT_MODE(&hfdcan1, DM_YAW_CAN_ID);
-    Motor_ENABLE(&hfdcan1, DM_YAW_CAN_ID);
+    Motor_ENABLE(&hfdcan1, DM_BIG_YAW_CAN_ID);
 //		Motor_MIT_MODE(&hfdcan2, DM_PIT_CAN_ID);
     Motor_ENABLE(&hfdcan2, DM_PIT_CAN_ID);
+    Motor_ENABLE(&hfdcan2, DM_ROLL_CAN_ID);
 
     gimbal_total_pid_clear(control);
     gimbal_feedback_update(control);
@@ -1612,7 +1613,7 @@ __attribute__((used)) void gimbal_send_cmd(gimbal_control_t *control)
     yaw_cmd_torque = gimbal_output_to_mit_torque(yaw_can_set_current);
     pitch_cmd_torque = gimbal_output_to_mit_torque(pitch_can_set_current);
 
-    CAN_cmd_MIT(&hfdcan1, DM_YAW_CAN_ID, 0.0f, 0.0f, 0.0f, 0.0f, yaw_cmd_torque);
+    CAN_cmd_MIT(&hfdcan1, DM_BIG_YAW_CAN_ID, 0.0f, 0.0f, 0.0f, 0.0f, yaw_cmd_torque);
     CAN_cmd_MIT(&hfdcan2, DM_PIT_CAN_ID, 0.0f, 0.0f, 0.0f, 0.0f, pitch_cmd_torque);
 }
 #endif

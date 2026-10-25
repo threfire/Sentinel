@@ -138,7 +138,7 @@ static void shoot_task_init_control(shoot_task_control_t *control)
                           SHOOT_FRIC3_OBSERVER_RATIO,
                           SHOOT_FRIC3_OUTPUT_RATE_LIMIT);
 
-    Motor_ENABLE(&hfdcan1, DM_STRUM_CAN_ID);
+    Motor_ENABLE(&hfdcan2, DM_STRUM_CAN_ID);
 }
 
 static void shoot_task_set_mode(shoot_task_control_t *control)
@@ -709,7 +709,7 @@ static void shoot_task_send_friction_current(int16_t fric1_current, int16_t fric
     data[6] = 0U;
     data[7] = 0U;
 
-    canx_send_data(&hfdcan2, SHOOT_FRICTION_CMD_ID, data, 8U);
+    canx_send_data(&hfdcan3, SHOOT_FRICTION_CMD_ID, data, 8U);
 }
 
 /**
@@ -720,7 +720,7 @@ static void shoot_task_send_friction_current(int16_t fric1_current, int16_t fric
 static void shoot_task_send_strum_torque(float torque_nm)
 {
     torque_nm = shoot_task_clamp_float(torque_nm, T_MIN, T_MAX);
-    CAN_cmd_MIT(&hfdcan1, DM_STRUM_CAN_ID, 0.0f, 0.0f, 0.0f, 0.0f, torque_nm);
+    CAN_cmd_MIT(&hfdcan2, DM_STRUM_CAN_ID, 0.0f, 0.0f, 0.0f, 0.0f, torque_nm);
 }
 
 static void shoot_task_motor_init(shoot_task_motor_t *motor,

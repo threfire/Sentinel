@@ -195,13 +195,16 @@ extern "C" {
 /* ========================= CAN 电机 ID 配置 ========================= */
 /* MIT 电机 CAN ID：命令 ID 为 1~4，反馈 ID 为 0x51~0x54 */
 #define DM_STRUM_CAN_ID                     0X01
-#define DM_YAW_CAN_ID                       0X02
+#define DM_BIG_YAW_CAN_ID                   0X02
+#define DM_YAW_CAN_ID                       DM_BIG_YAW_CAN_ID
 #define DM_ROLL_CAN_ID                      0X04
 #define DM_PIT_CAN_ID                       0X03
 #define DM_STRUM_MASTER_ID                  0X51
-#define DM_YAW_MASTER_ID                    0X52
+#define DM_BIG_YAW_MASTER_ID                0X52
+#define DM_YAW_MASTER_ID                    DM_BIG_YAW_MASTER_ID
 #define DM_ROLL_MASTER_ID                   0X54
 #define DM_PIT_MASTER_ID                    0X53
+#define CAN_SMALL_YAW_ID                    0X205 // ? yaw DJI 6020 ???? ID
 #define CAN_FRIC1_ID                        0X201 // 摩擦轮 1 电机 ID
 #define CAN_FRIC2_ID                        0X202 // 摩擦轮 2 电机 ID
 #define CAN_FRIC3_ID                        0X203 // 摩擦轮 3 电机 ID
