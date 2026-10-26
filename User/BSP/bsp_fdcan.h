@@ -85,6 +85,7 @@ typedef struct
 extern __IO CAN_ErrorStatus can_error_status;
 extern MITMeasure_t MIT_MOTOR_MEASURE[5];
 extern motor_measure_t CHASSIS_MOTOR_MEASURE[4];
+extern motor_measure_t DJI_MOTOR_MEASURE[8];
 
 void bsp_can_init(void);
 void can1_filter_init(void);

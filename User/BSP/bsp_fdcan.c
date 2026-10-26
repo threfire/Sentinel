@@ -1,3 +1,22 @@
+/**
+ * @file    bsp_fdcan.c
+ * @brief   CAN 通信及电机反馈解析。
+ *
+ * 电机反馈结构体映射（ID 为反馈帧 ID）：
+ * CAN1 大 yaw（MIT，0x52）：MIT_MOTOR_MEASURE[1].fdb。
+ * CAN1 底盘电机（0x205~0x208）：CHASSIS_MOTOR_MEASURE[0]~[3]，按 ID 顺序对应。
+ * CAN2 小 yaw（6020，0x205）：DJI_MOTOR_MEASURE[3]。
+ * CAN2 pitch（MIT，0x53）：MIT_MOTOR_MEASURE[3].fdb。
+ * CAN2 roll（MIT，0x54）：MIT_MOTOR_MEASURE[2].fdb。
+ * CAN2 拨弹（MIT，0x51）：MIT_MOTOR_MEASURE[0].fdb。
+ * CAN3 摩擦轮 1~3（M2006+C610，0x201~0x203）：DJI_MOTOR_MEASURE[0]~[2]。
+ *
+ * MIT 反馈字段：pos 为位置（rad），vel 为角速度（rad/s），tor 为力矩（N·m），
+ * state 为电机状态，t_mos/t_motor 为驱动器/电机温度。
+ * DJI 反馈字段：ecd 为编码器值，speed_rpm 为转速（转/分钟），
+ * given_current 为反馈电流原始值，temperate 为温度。
+ * last_fdb_time 为最近一次反馈接收时间（ms）；MIT 电机位于 fdb 内。
+ */
 #include "bsp_fdcan.h"
 #include "stdint.h"
 #include "robot_param.h"

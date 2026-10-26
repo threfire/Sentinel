@@ -137,8 +137,8 @@ extern "C" {
 /* ========================= 云台机械限位与初始化配置 ========================= */
 #define YAW_MAX_RELATIVE_ANGLE             1.5707963f  // yaw 相对角上限
 #define YAW_MIN_RELATIVE_ANGLE            -1.5707963f  // yaw 相对角下限
-#define PITCH_MAX_RELATIVE_ANGLE           0.1f        // pitch 软件上限，单位 rad
-#define PITCH_MIN_RELATIVE_ANGLE          -0.71f       // pitch 软件下限，单位 rad
+#define PITCH_HEAD_UP_MOTOR_ANGLE_RAD      1.0f        // pitch 抬头时的 MIT 位置反馈（rad）
+#define PITCH_HEAD_DOWN_MOTOR_ANGLE_RAD    1.85f       // pitch 低头时的 MIT 位置反馈（rad）
 #define HALF_ECD_RANGE                     4096        // 编码器半量程
 #define ECD_RANGE                          8191        // 编码器总量程
 #define GIMBAL_INIT_ANGLE_ERROR            0.1f        // 初始化目标角允许误差
@@ -169,7 +169,7 @@ extern "C" {
 #define PITCH_GRAVITY_COMP_OUTPUT_LIMIT    (T_MAX / 5.0f)   // 重力补偿输出限幅
 
 /* ========================= 射速估计参数 ========================= */
-#define SHOOT_FRIC_WHEEL_RADIUS_M          0.022f
+#define SHOOT_FRIC_WHEEL_RADIUS_M          0.020f
 #define SHOOT_BULLET_42MM_MASS_KG          0.0404f
 #define SHOOT_FRIC_ROTATING_MASS_KG        0.1793f
 #define SHOOT_FRIC_ROTATING_INERTIA_KGM2   (0.5f * SHOOT_FRIC_ROTATING_MASS_KG * SHOOT_FRIC_WHEEL_RADIUS_M * SHOOT_FRIC_WHEEL_RADIUS_M)
@@ -196,6 +196,15 @@ extern "C" {
 /* MIT 电机 CAN ID：命令 ID 为 1~4，反馈 ID 为 0x51~0x54 */
 #define DM_STRUM_CAN_ID                     0X01
 #define DM_BIG_YAW_CAN_ID                   0X02
+#define GIMBAL_ROLL_YAW_SAFE_ANGLE_RAD      0.6f        // 大 yaw 朝前机械角；roll 抬放允许位置（rad）
+#define GIMBAL_ROLL_LIFT_ANGLE_RAD          -0.0768f    // roll 抬起位置（rad）
+#define GIMBAL_ROLL_LOWER_ANGLE_RAD         -1.8222f    // roll 倒下位置（rad）
+#define GIMBAL_ROLL_MOVE_SPEED_RAD_S        0.5f        // roll 抬放目标角最大变化速度（rad/s）
+#define GIMBAL_ROLL_POSITION_KP             2.0f        // roll MIT 位置比例系数
+#define GIMBAL_ROLL_POSITION_KD             0.5f        // roll MIT 速度阻尼系数
+#define GIMBAL_ROLL_ARRIVE_ERROR_RAD        0.03f       // roll 到位角度误差（rad）
+#define GIMBAL_ROLL_ARRIVE_SPEED_RAD_S      0.1f        // roll 到位角速度阈值（rad/s）
+#define GIMBAL_ROLL_FEEDBACK_TIMEOUT_MS     100U        // roll 反馈超时时间（ms）
 #define DM_YAW_CAN_ID                       DM_BIG_YAW_CAN_ID
 #define DM_ROLL_CAN_ID                      0X04
 #define DM_PIT_CAN_ID                       0X03
@@ -205,6 +214,7 @@ extern "C" {
 #define DM_ROLL_MASTER_ID                   0X54
 #define DM_PIT_MASTER_ID                    0X53
 #define CAN_SMALL_YAW_ID                    0X205 // ? yaw DJI 6020 ???? ID
+#define SMALL_YAW_FORWARD_ECD               670U  // 小 yaw 朝前时的 6020 编码器值
 #define CAN_FRIC1_ID                        0X201 // 摩擦轮 1 电机 ID
 #define CAN_FRIC2_ID                        0X202 // 摩擦轮 2 电机 ID
 #define CAN_FRIC3_ID                        0X203 // 摩擦轮 3 电机 ID
@@ -260,7 +270,10 @@ extern "C" {
 #define NORMAL_MAX_CHASSIS_SPEED_X        5.2f               // 底盘 x 方向最大速度，单位 m/s
 #define NORMAL_MAX_CHASSIS_SPEED_Y        5.2f               // 底盘 y 方向最大速度，单位 m/s
 #define MAX_WHEEL_SPEED                   5.2f               // 单轮目标速度上限，单位 m/s
-#define CHASSIS_SPIN_SPEED                25.0f              // 小陀螺固定旋转速度，单位 rad/s
+#define CHASSIS_SPIN_SPEED                25.0f              // small yaw spin speed upper limit, rad/s
+#define CHASSIS_SPIN_MIN_SPEED            8.0f               // small yaw spin speed valley, rad/s
+#define CHASSIS_SPIN_PERIOD_MS            2000U              // small yaw speed waveform period, ms
+#define CHASSIS_SPIN_YAW_LIMIT_MARGIN_RAD  0.15f              // 小陀螺停止前预留的大 yaw 相对角余量，rad
 
 #define CHASSIS_ACCEL_X_NUM               0.1f               // x 方向遥控速度一阶滤波系数，无量纲
 #define CHASSIS_ACCEL_Y_NUM               0.1f               // y 方向遥控速度一阶滤波系数，无量纲
@@ -268,7 +281,7 @@ extern "C" {
 #define CHASSIS_MAX_JERK                  35.0f              // 底盘平移最大加加速度，单位 m/s^3
 #define CHASSIS_STOP_DECEL                28.0f              // 底盘松杆停车减速度，单位 m/s^2
 #define CHASSIS_STOP_JERK                 1000.0f            // 底盘松杆停车减速度变化率，单位 m/s^3
-#define CHASSIS_WZ_MAX_SPEED              12.0f              // 底盘旋转最大角速度，单位 rad/s
+#define CHASSIS_WZ_MAX_SPEED              CHASSIS_SPIN_SPEED // chassis maximum angular speed, rad/s
 #define CHASSIS_WZ_MAX_ACCEL              18.0f              // 底盘旋转最大角加速度，单位 rad/s^2
 #define CHASSIS_WZ_MAX_JERK               160.0f             // 底盘旋转最大角加加速度，单位 rad/s^3
 #define CHASSIS_LAT_ACCEL_LIMIT           9.0f               // 底盘高速转弯横向加速度上限，单位 m/s^2
@@ -347,8 +360,8 @@ extern "C" {
 #define CHASSIS_BRAKE_RELEASE_SPEED_EPS   0.01f              // 制动释放实测轮速阈值，单位 m/s
 
 /* ========================= MIT 协议参数范围 ========================= */
-#define P_MIN                              -12.5663704f // 位置最小值
-#define P_MAX                               12.5663704f // 位置最大值
+#define P_MIN                              -3.14159f    // 位置映射下限（rad），与电机端 PMAX 对应
+#define P_MAX                               3.14159f    // 位置映射上限（rad），与电机端 PMAX 一致
 #define V_MIN                              -30          // 速度最小值
 #define V_MAX                               30          // 速度最大值
 #define KP_MIN                              0.0         // Kp 最小值

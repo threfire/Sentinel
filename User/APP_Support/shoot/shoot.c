@@ -28,6 +28,7 @@ static void shoot_task_stop_friction(shoot_task_control_t *control);
 static void shoot_task_control_strum(shoot_task_control_t *control);
 static void shoot_task_send_friction_current(int16_t fric1_current, int16_t fric2_current, int16_t fric3_current);
 static void shoot_task_send_strum_torque(float torque_nm);
+static void shoot_task_send_strum_mit(float pos, float vel, float kp, float kd, float torque_nm);
 static void shoot_task_motor_init(shoot_task_motor_t *motor,
                                   const motor_measure_t *measure,
                                   float direction,
@@ -144,42 +145,12 @@ static void shoot_task_init_control(shoot_task_control_t *control)
 static void shoot_task_set_mode(shoot_task_control_t *control)
 {
 
-    static uint16_t last_key_value = 0U;
-    uint16_t pressed_keys;
-    int shoot_switch;
-
     if (control == NULL || control->rc == NULL)
     {
         return;
     }
 
-    pressed_keys = (uint16_t)(control->rc->key.v & (uint16_t)(~last_key_value));
-    last_key_value = control->rc->key.v;
-
-    shoot_switch = control->rc->rc.s[SHOOT_RC_MODE_CHANNEL];
-
-    if ((pressed_keys & KEY_PRESSED_OFFSET_R) != 0U)
-    {
-
-        control->friction_enable = true;
-    }
-
-    if ((pressed_keys & KEY_PRESSED_OFFSET_G) != 0U)
-    {
-
-        control->friction_enable = false;
-    }
-
-    if (switch_is_down(shoot_switch))
-    {
-
-        control->friction_enable = true;
-    }
-    else if (switch_is_mid(shoot_switch))
-    {
-
-        control->friction_enable = false;
-    }
+    control->friction_enable = gimbal_friction_is_enabled();
 
     if (gimbal_cmd_to_shoot_stop())
     {
@@ -473,7 +444,7 @@ static void shoot_task_control_strum(shoot_task_control_t *control)
         return;
     }
 
-    press_l = (control->rc->mouse.press_l != 0U);
+    press_l = (control->rc->mouse.press_l != 0U) || gimbal_strum_is_enabled();
     heat_blocked = shoot_task_fire_heat_would_over_limit(control);
     strum_ready = (control->mode == SHOOT_TASK_READY_FRIC) && !heat_blocked;
     control->heat_limit_active = heat_blocked;
@@ -506,6 +477,30 @@ static void shoot_task_control_strum(shoot_task_control_t *control)
         shoot_task_send_strum_torque(0.0f);
         return;
     }
+
+    /* 保持 18 Hz 弹频：12 发/圈对应 1.5 圈/s，即 3*pi rad/s。 */
+    if (press_l)
+    {
+        strum_measure->set.POS = strum_measure->fdb.pos;
+        strum_measure->set.VEL = SHOOT_STRUM_DIRECTION * SHOOT_STRUM_SPEED_RAD_S;
+        strum_measure->set.KP = SHOOT_STRUM_SPEED_KP;
+        strum_measure->set.KD = SHOOT_STRUM_SPEED_KD;
+        strum_measure->set.TOR = 0.0f;
+        shoot_task_send_strum_mit(strum_measure->set.POS,
+                                  strum_measure->set.VEL,
+                                  strum_measure->set.KP,
+                                  strum_measure->set.KD,
+                                  0.0f);
+        return;
+    }
+
+    strum_measure->set.POS = strum_measure->fdb.pos;
+    strum_measure->set.VEL = 0.0f;
+    strum_measure->set.KP = 0.0f;
+    strum_measure->set.KD = 0.0f;
+    strum_measure->set.TOR = 0.0f;
+    shoot_task_send_strum_mit(strum_measure->set.POS, 0.0f, 0.0f, 0.0f, 0.0f);
+    return;
 
     feedback_pos = strum_measure->fdb.pos;
     feedback_vel = strum_measure->fdb.vel;
@@ -721,6 +716,11 @@ static void shoot_task_send_strum_torque(float torque_nm)
 {
     torque_nm = shoot_task_clamp_float(torque_nm, T_MIN, T_MAX);
     CAN_cmd_MIT(&hfdcan2, DM_STRUM_CAN_ID, 0.0f, 0.0f, 0.0f, 0.0f, torque_nm);
+}
+
+static void shoot_task_send_strum_mit(float pos, float vel, float kp, float kd, float torque_nm)
+{
+    CAN_cmd_MIT(&hfdcan2, DM_STRUM_CAN_ID, pos, vel, kp, kd, torque_nm);
 }
 
 static void shoot_task_motor_init(shoot_task_motor_t *motor,

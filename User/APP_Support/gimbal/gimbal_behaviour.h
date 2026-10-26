@@ -19,7 +19,16 @@ typedef enum
     GIMBAL_RELATIVE_ANGLE,
     GIMBAL_MOTIONLESS,
     GIMBAL_SPIN,
+    GIMBAL_AUTO_SENTINEL,
 } gimbal_behaviour_e;
+
+typedef enum
+{
+    GIMBAL_TOTAL_MOTIONLESS = 0,
+    GIMBAL_TOTAL_FOLLOW,
+    GIMBAL_TOTAL_SPIN,
+    GIMBAL_TOTAL_AUTO_SENTINEL,
+} gimbal_total_mode_e;
 
 extern volatile gimbal_behaviour_e gimbal_behaviour;
 
@@ -37,6 +46,14 @@ extern volatile gimbal_behaviour_e gimbal_behaviour;
 
 #ifndef GIMBAL_SPIN_SPEED
 #define GIMBAL_SPIN_SPEED 0.0f
+#endif
+
+#ifndef GIMBAL_AUTO_SENTINEL_REPEAT_WINDOW_MS
+#define GIMBAL_AUTO_SENTINEL_REPEAT_WINDOW_MS 500U
+#endif
+
+#ifndef GIMBAL_YAW_ORIGIN_TOLERANCE
+#define GIMBAL_YAW_ORIGIN_TOLERANCE 0.08f
 #endif
 
 /**
@@ -62,6 +79,17 @@ bool gimbal_cmd_to_chassis_stop(void);
   * @retval         true 表示请求射击停止
   */
 bool gimbal_cmd_to_shoot_stop(void);
+
+gimbal_total_mode_e gimbal_total_mode_get(void);
+bool gimbal_roll_is_lifted(void);
+bool gimbal_roll_target_is_lifted(void);
+bool gimbal_roll_motion_is_active(void);
+bool gimbal_roll_control_is_allowed(void);
+bool gimbal_small_yaw_control_is_allowed(void);
+void gimbal_roll_motion_complete(void);
+void gimbal_roll_motion_cancel(void);
+bool gimbal_friction_is_enabled(void);
+bool gimbal_strum_is_enabled(void);
 
 /**
   * @brief          更新云台行为状态机

@@ -31,6 +31,15 @@
 #ifndef SHOOT_STRUM_LONG_PRESS_TORQUE_NM
 #define SHOOT_STRUM_LONG_PRESS_TORQUE_NM 0.5f
 #endif
+#ifndef SHOOT_STRUM_SPEED_RAD_S
+#define SHOOT_STRUM_SPEED_RAD_S (3.0f * PI)
+#endif
+#ifndef SHOOT_STRUM_SPEED_KP
+#define SHOOT_STRUM_SPEED_KP 1.0f
+#endif
+#ifndef SHOOT_STRUM_SPEED_KD
+#define SHOOT_STRUM_SPEED_KD 0.2f
+#endif
 
 #ifndef SHOOT_STRUM_SINGLE_TORQUE_FF_NM
 #define SHOOT_STRUM_SINGLE_TORQUE_FF_NM 6.0f
@@ -73,16 +82,21 @@
 #endif
 
 /* 摩擦轮目标与保护配置 */
-#ifndef SHOOT_FRIC_TARGET_SPEED_RPM
-#define SHOOT_FRIC_TARGET_SPEED_RPM 5130  // 三路摩擦轮统一目标转速，单位 rpm
+#ifndef SHOOT_FRIC_WHEEL_RADIUS_M
+#define SHOOT_FRIC_WHEEL_RADIUS_M 0.020f  // 摩擦轮半径，单位 m
 #endif
 
-#ifndef SHOOT_FRIC_WHEEL_RADIUS_M
-#define SHOOT_FRIC_WHEEL_RADIUS_M 0.03f   // 摩擦轮半径，单位 m
+#ifndef SHOOT_FRIC_TARGET_SPEED_MPS
+#define SHOOT_FRIC_TARGET_SPEED_MPS 15.0f  // 摩擦轮线速度目标，单位 m/s
+#endif
+
+#ifndef SHOOT_FRIC_TARGET_SPEED_RPM
+#define SHOOT_FRIC_TARGET_SPEED_RPM \
+    (SHOOT_FRIC_TARGET_SPEED_MPS * 60.0f / (2.0f * PI * SHOOT_FRIC_WHEEL_RADIUS_M))
 #endif
 
 #ifndef SHOOT_FRIC_MAX_CURRENT
-#define SHOOT_FRIC_MAX_CURRENT 5       // 三路摩擦轮电流上限，单位 A
+#define SHOOT_FRIC_MAX_CURRENT 3       // 三路摩擦轮电流上限，单位 A
 #endif
 
 #ifndef SHOOT_FRIC_CURRENT_CMD_FULL_SCALE
@@ -191,7 +205,7 @@
 #endif
 
 #ifndef SHOOT_FRIC1_FF_CURRENT
-#define SHOOT_FRIC1_FF_CURRENT 3.2f        // fric1 固定前馈电流，单位 A
+#define SHOOT_FRIC1_FF_CURRENT 1.0f        // fric1 固定前馈电流，单位 A
 #endif
 
 #ifndef SHOOT_FRIC1_FF_DURATION_MS
@@ -211,7 +225,7 @@
 #endif
 
 #ifndef SHOOT_FRIC2_FF_CURRENT
-#define SHOOT_FRIC2_FF_CURRENT 3.2f        // fric2 固定前馈电流，单位 A
+#define SHOOT_FRIC2_FF_CURRENT 1.0f        // fric2 固定前馈电流，单位 A
 #endif
 
 #ifndef SHOOT_FRIC2_FF_DURATION_MS
@@ -231,7 +245,7 @@
 #endif
 
 #ifndef SHOOT_FRIC3_FF_CURRENT
-#define SHOOT_FRIC3_FF_CURRENT 3.2f        // fric3 固定前馈电流，单位 A
+#define SHOOT_FRIC3_FF_CURRENT 1.0f        // fric3 固定前馈电流，单位 A
 #endif
 
 #ifndef SHOOT_FRIC3_FF_DURATION_MS

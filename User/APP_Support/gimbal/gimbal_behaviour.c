@@ -4,9 +4,185 @@
   * @note       将遥控器、键鼠、自瞄和初始化状态转换为云台行为模式与角度增量。
   */
 #include "gimbal_behaviour.h"
+#include "bsp_fdcan.h"
+#include "detect_task.h"
+#include "user_lib.h"
+#include "stm32h7xx_hal.h"
 #include <math.h>
 
+#ifndef SHOOT_RC_MODE_CHANNEL
+#define SHOOT_RC_MODE_CHANNEL 1
+#endif
+
 volatile gimbal_behaviour_e gimbal_behaviour = GIMBAL_ZERO_FORCE;
+static gimbal_total_mode_e gimbal_total_mode = GIMBAL_TOTAL_MOTIONLESS;
+static bool gimbal_roll_lifted = false;
+static bool gimbal_roll_target_lifted = false;
+static bool gimbal_roll_motion_active = false;
+static bool gimbal_roll_control_allowed = false;
+static bool gimbal_friction_enabled = false;
+static bool gimbal_strum_enabled = false;
+
+static void gimbal_remote_state_update(const gimbal_control_t *control)
+{
+    static bool initialized = false;
+    static uint16_t last_s0 = RC_SW_MID;
+    static uint16_t last_s1 = RC_SW_MID;
+    static uint8_t s0_up_count = 0U;
+    static uint8_t s1_down_count = 0U;
+    static uint32_t last_s0_up_tick = 0U;
+    uint16_t s0;
+    uint16_t s1;
+    uint32_t now;
+
+    if (control == 0 || control->gimbal_rc_ctrl == 0)
+    {
+        return;
+    }
+
+    s0 = control->gimbal_rc_ctrl->rc.s[GIMBAL_MODE_CHANNEL];
+    s1 = control->gimbal_rc_ctrl->rc.s[SHOOT_RC_MODE_CHANNEL];
+    now = HAL_GetTick();
+    gimbal_roll_control_allowed = !switch_is_mid(s0);
+
+    if (!initialized)
+    {
+        initialized = true;
+        last_s0 = s0;
+        last_s1 = s1;
+    }
+
+    if (switch_is_up(s0) && switch_is_mid(last_s0))
+    {
+        if (s0_up_count == 1U && (now - last_s0_up_tick) <= GIMBAL_AUTO_SENTINEL_REPEAT_WINDOW_MS)
+        {
+            gimbal_total_mode = gimbal_roll_lifted ?
+                                 GIMBAL_TOTAL_AUTO_SENTINEL :
+                                 GIMBAL_TOTAL_MOTIONLESS;
+            s0_up_count = 0U;
+        }
+        else
+        {
+            s0_up_count = 1U;
+            last_s0_up_tick = now;
+            gimbal_total_mode = gimbal_roll_lifted ?
+                                 GIMBAL_TOTAL_SPIN :
+                                 GIMBAL_TOTAL_MOTIONLESS;
+        }
+    }
+    else if (switch_is_mid(s0) && s0_up_count == 1U &&
+             (now - last_s0_up_tick) > GIMBAL_AUTO_SENTINEL_REPEAT_WINDOW_MS)
+    {
+        s0_up_count = 0U;
+    }
+
+    if (switch_is_down(s0))
+    {
+        s0_up_count = 0U;
+        gimbal_total_mode = GIMBAL_TOTAL_MOTIONLESS;
+    }
+    else if (switch_is_mid(s0))
+    {
+        gimbal_total_mode = GIMBAL_TOTAL_FOLLOW;
+    }
+    else if (switch_is_up(s0) && gimbal_total_mode != GIMBAL_TOTAL_AUTO_SENTINEL)
+    {
+        gimbal_total_mode = gimbal_roll_lifted ?
+                             GIMBAL_TOTAL_SPIN :
+                             GIMBAL_TOTAL_MOTIONLESS;
+    }
+
+    if (gimbal_roll_control_allowed && switch_is_mid(s1) && switch_is_up(last_s1))
+    {
+        const MITMeasure_t *yaw_measure = &MIT_MOTOR_MEASURE[GIMBAL_YAW_MIT_INDEX];
+        const MITMeasure_t *roll_measure = &MIT_MOTOR_MEASURE[GIMBAL_ROLL_MIT_INDEX];
+        const float angle_error = rad_format(yaw_measure->fdb.pos - GIMBAL_ROLL_YAW_SAFE_ANGLE_RAD);
+        if (!gimbal_roll_motion_active &&
+            !toe_is_error(YAW_GIMBAL_MOTOR_TOE) &&
+            !toe_is_error(ROLL_GIMBAL_MOTOR_TOE) &&
+            yaw_measure->fdb.last_fdb_time != 0U &&
+            roll_measure->fdb.last_fdb_time != 0U &&
+            now - yaw_measure->fdb.last_fdb_time <= GIMBAL_ROLL_FEEDBACK_TIMEOUT_MS &&
+            now - roll_measure->fdb.last_fdb_time <= GIMBAL_ROLL_FEEDBACK_TIMEOUT_MS &&
+            fabsf(angle_error) <= GIMBAL_YAW_ORIGIN_TOLERANCE)
+        {
+            gimbal_roll_target_lifted = !gimbal_roll_lifted;
+            gimbal_roll_motion_active = true;
+        }
+    }
+    if (switch_is_down(s1) && !switch_is_down(last_s1))
+    {
+        if (s1_down_count < 2U)
+        {
+            s1_down_count++;
+        }
+        if (s1_down_count >= 2U)
+        {
+            gimbal_friction_enabled = true;
+            s1_down_count = 0U;
+        }
+    }
+    gimbal_strum_enabled = gimbal_friction_enabled && switch_is_down(s1);
+
+    last_s0 = s0;
+    last_s1 = s1;
+}
+
+gimbal_total_mode_e gimbal_total_mode_get(void)
+{
+    return gimbal_total_mode;
+}
+
+bool gimbal_roll_is_lifted(void)
+{
+    return gimbal_roll_lifted;
+}
+
+bool gimbal_roll_target_is_lifted(void)
+{
+    return gimbal_roll_target_lifted;
+}
+
+bool gimbal_roll_motion_is_active(void)
+{
+    return gimbal_roll_motion_active;
+}
+
+bool gimbal_roll_control_is_allowed(void)
+{
+    return gimbal_roll_control_allowed;
+}
+
+bool gimbal_small_yaw_control_is_allowed(void)
+{
+    return gimbal_roll_lifted &&
+           !gimbal_roll_motion_active &&
+           (gimbal_behaviour == GIMBAL_RELATIVE_ANGLE ||
+            gimbal_behaviour == GIMBAL_SPIN ||
+            gimbal_behaviour == GIMBAL_AUTO_SENTINEL);
+}
+
+void gimbal_roll_motion_complete(void)
+{
+    gimbal_roll_lifted = gimbal_roll_target_lifted;
+    gimbal_roll_motion_active = false;
+}
+
+void gimbal_roll_motion_cancel(void)
+{
+    gimbal_roll_target_lifted = gimbal_roll_lifted;
+    gimbal_roll_motion_active = false;
+}
+
+bool gimbal_friction_is_enabled(void)
+{
+    return gimbal_friction_enabled;
+}
+
+bool gimbal_strum_is_enabled(void)
+{
+    return gimbal_strum_enabled;
+}
 
 /**
   * @brief          对遥控器通道值执行死区处理
@@ -99,6 +275,11 @@ void gimbal_behaviour_mode_set(gimbal_control_t *control)
         control->gimbal_pitch_motor.mode = GIMBAL_MOTOR_ENCODE;
         break;
 
+    case GIMBAL_AUTO_SENTINEL:
+        control->gimbal_yaw_motor.mode = GIMBAL_MOTOR_GYRO;
+        control->gimbal_pitch_motor.mode = GIMBAL_MOTOR_ENCODE;
+        break;
+
     case GIMBAL_MOTIONLESS:
     default:
         control->gimbal_yaw_motor.mode = GIMBAL_MOTOR_RAW;
@@ -141,6 +322,9 @@ void gimbal_behaviour_control_set(float *add_yaw, float *add_pitch, gimbal_contr
     case GIMBAL_SPIN:
         gimbal_spin_control(add_yaw, add_pitch, control);
         break;
+    case GIMBAL_AUTO_SENTINEL:
+        gimbal_spin_control(add_yaw, add_pitch, control);
+        break;
     default:
         *add_yaw = 0.0f;
         *add_pitch = 0.0f;
@@ -178,20 +362,40 @@ bool gimbal_cmd_to_shoot_stop(void)
   */
 void gimbal_behavour_set(gimbal_control_t *control)
 {
-    static gimbal_behaviour_e last_gimbal_behaviour = GIMBAL_ZERO_FORCE;
     static unsigned int init_time = 0U;
     static unsigned int init_stop_time = 0U;
-    int mode_switch = 0;
 
     if (control == 0)
     {
         return;
     }
 
-    if (control->gimbal_rc_ctrl == 0)
+    /* 遥控器离线或拨杆数据无效时，禁止初始化回中及动作输出。 */
+    if (control->gimbal_rc_ctrl == 0 || toe_is_error(DBUS_TOE) ||
+        !(switch_is_up(control->gimbal_rc_ctrl->rc.s[GIMBAL_MODE_CHANNEL]) ||
+          switch_is_mid(control->gimbal_rc_ctrl->rc.s[GIMBAL_MODE_CHANNEL]) ||
+          switch_is_down(control->gimbal_rc_ctrl->rc.s[GIMBAL_MODE_CHANNEL])) ||
+        !(switch_is_up(control->gimbal_rc_ctrl->rc.s[SHOOT_RC_MODE_CHANNEL]) ||
+          switch_is_mid(control->gimbal_rc_ctrl->rc.s[SHOOT_RC_MODE_CHANNEL]) ||
+          switch_is_down(control->gimbal_rc_ctrl->rc.s[SHOOT_RC_MODE_CHANNEL])))
     {
         gimbal_behaviour = GIMBAL_ZERO_FORCE;
-        last_gimbal_behaviour = gimbal_behaviour;
+        gimbal_total_mode = GIMBAL_TOTAL_MOTIONLESS;
+        gimbal_roll_control_allowed = false;
+        gimbal_friction_enabled = false;
+        gimbal_strum_enabled = false;
+        init_time = 0U;
+        init_stop_time = 0U;
+        return;
+    }
+
+    gimbal_remote_state_update(control);
+
+    /* roll 抬起状态确认前保持无力，禁止自动回中。 */
+    if (!gimbal_roll_lifted || gimbal_roll_motion_active)
+    {
+        gimbal_total_mode = GIMBAL_TOTAL_MOTIONLESS;
+        gimbal_behaviour = GIMBAL_ZERO_FORCE;
         return;
     }
 
@@ -205,7 +409,6 @@ void gimbal_behavour_set(gimbal_control_t *control)
     if (control->gimbal_cali.step == GIMBAL_CALI_START_STEP)
     {
         gimbal_behaviour = GIMBAL_CALI;
-        last_gimbal_behaviour = gimbal_behaviour;
         return;
     }
 
@@ -229,7 +432,6 @@ void gimbal_behavour_set(gimbal_control_t *control)
 
         if (init_time < GIMBAL_INIT_TIME && init_stop_time < GIMBAL_INIT_STOP_TIME)
         {
-            last_gimbal_behaviour = gimbal_behaviour;
             return;
         }
 
@@ -237,45 +439,23 @@ void gimbal_behavour_set(gimbal_control_t *control)
         init_stop_time = 0U;
     }
 
-    mode_switch = control->gimbal_rc_ctrl->rc.s[GIMBAL_MODE_CHANNEL];
-
-    if (switch_is_mid(mode_switch))
+    switch (gimbal_total_mode)
     {
-        gimbal_behaviour = GIMBAL_MOTIONLESS;
-    }
-    else if (switch_is_up(mode_switch))
-    {
-        gimbal_behaviour = GIMBAL_SPIN;
-    }
-    else if (switch_is_down(mode_switch))
-    {
+    case GIMBAL_TOTAL_FOLLOW:
         gimbal_behaviour = GIMBAL_RELATIVE_ANGLE;
-    }
-    else
-    {
-        gimbal_behaviour = GIMBAL_ZERO_FORCE;
-    }
-
-    if (switch_is_down(mode_switch) && (control->gimbal_rc_ctrl->key.v & GIMBAL_ZERO_KEYBOARD))
-    {
-        gimbal_behaviour = GIMBAL_MOTIONLESS;
-    }
-    else if (switch_is_down(mode_switch) && (control->gimbal_rc_ctrl->key.v & GIMBAL_SPIN_KEYBOARD))
-    {
+        break;
+    case GIMBAL_TOTAL_SPIN:
         gimbal_behaviour = GIMBAL_SPIN;
-    }
-    else if (switch_is_down(mode_switch) && (control->gimbal_rc_ctrl->key.v & GIMBAL_RELATIVE_KEYBOARD))
-    {
-        gimbal_behaviour = GIMBAL_RELATIVE_ANGLE;
-    }
-
-    if (last_gimbal_behaviour == GIMBAL_ZERO_FORCE &&
-        gimbal_behaviour != GIMBAL_ZERO_FORCE)
-    {
-        gimbal_behaviour = GIMBAL_INIT;
+        break;
+    case GIMBAL_TOTAL_AUTO_SENTINEL:
+        gimbal_behaviour = GIMBAL_AUTO_SENTINEL;
+        break;
+    case GIMBAL_TOTAL_MOTIONLESS:
+    default:
+        gimbal_behaviour = GIMBAL_MOTIONLESS;
+        break;
     }
 
-    last_gimbal_behaviour = gimbal_behaviour;
 }
 
 /**
@@ -406,6 +586,6 @@ void gimbal_spin_control(float *yaw, float *pitch, gimbal_control_t *control)
     }
 
     gimbal_read_manual_input(&manual_yaw, &manual_pitch, control);
-    *yaw = GIMBAL_SPIN_SPEED + manual_yaw;
+    *yaw = manual_yaw;
     *pitch = manual_pitch;
 }

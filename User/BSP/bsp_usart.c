@@ -124,7 +124,6 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef * huart, uint16_t Size)
 	}
 	if(huart->Instance == UART7)
 	{
-		hwt101_rx_parse(usart7_buf, Size);
 		HAL_UARTEx_ReceiveToIdle_DMA(&huart7, usart7_buf, USART_RX_BUF_LENGHT);
 	}
 

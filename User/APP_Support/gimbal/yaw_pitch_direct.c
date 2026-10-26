@@ -4,11 +4,13 @@
   * @note       实现云台反馈更新、目标限幅、前馈补偿、PID 闭环、在线保护和 MIT 力矩发送。
   */
 #include "yaw_pitch_direct.h"
+#include "gimbal_behaviour.h"
 #include "auto_aim.h"
 #include "hwt_imu.h"
 #include "bsp_fdcan.h"
 #include "detect_task.h"
 #include "robot_param.h"
+#include "user_lib.h"
 #include "cmsis_os.h"
 #include <math.h>
 #include <string.h>
@@ -21,6 +23,20 @@ int16_t shoot_can_set_current = 0;
 
 static float yaw_auto_aim_target_vel = 0.0f;
 static float pitch_auto_aim_target_vel = 0.0f;
+static gimbal_pid_t small_yaw_angle_pid;
+static gimbal_pid_t small_yaw_speed_pid;
+static float small_yaw_angle_rad = 0.0f;
+static float small_yaw_target_rad = 0.0f;
+static uint16_t small_yaw_last_ecd = 0U;
+static uint8_t small_yaw_feedback_init = 0U;
+static uint8_t scan_yaw_direction = 1U;
+static uint8_t scan_pitch_direction = 1U;
+static float scan_pitch_target_rad = 0.0f;
+
+static void small_yaw_feedback_update(void);
+static void small_yaw_scan_update(gimbal_control_t *control, uint8_t auto_enable, float add_yaw, float add_pitch);
+static void small_yaw_control_update(void);
+static int16_t small_yaw_current_to_cmd(float current_a);
 
 /**
   * @brief          声明 yaw 电机在线检测函数
@@ -423,11 +439,10 @@ static void gimbal_yaw_absolute_angle_limit(gimbal_control_t *control,
     }
 
     yaw_motor = &control->gimbal_yaw_motor;
-    chassis_yaw = hwt101_get_yaw_total_rad();
+    chassis_yaw = yaw_motor->absolute_angle - yaw_motor->relative_angle;
     rc_relative_angle_set =
         yaw_motor->rc_absolute_angle_set -
-        chassis_yaw -
-        yaw_motor->angle_offset;
+        chassis_yaw;
 
     if (rc_enable != 0u)
     {
@@ -445,7 +460,7 @@ static void gimbal_yaw_absolute_angle_limit(gimbal_control_t *control,
                          yaw_motor->max_relative_angle);
     yaw_motor->rc_relative_angle_set = rc_relative_angle_set;
     yaw_motor->rc_absolute_angle_set =
-        chassis_yaw + yaw_motor->angle_offset + rc_relative_angle_set;
+        chassis_yaw + rc_relative_angle_set;
 
     if (auto_enable != 0u)
     {
@@ -476,13 +491,13 @@ static void gimbal_yaw_absolute_angle_limit(gimbal_control_t *control,
 
     yaw_motor->auto_relative_angle_set = auto_relative_angle_set;
     yaw_motor->auto_absolute_angle_set =
-        chassis_yaw + yaw_motor->angle_offset + auto_relative_angle_set;
+        chassis_yaw + auto_relative_angle_set;
 
     yaw_motor->relative_angle_set =
         rc_relative_angle_set +
         ((auto_enable != 0u) ? (auto_relative_angle_set - yaw_motor->relative_angle) : 0.0f);
     yaw_motor->absolute_angle_set =
-        chassis_yaw + yaw_motor->angle_offset + yaw_motor->relative_angle_set;
+        chassis_yaw + yaw_motor->relative_angle_set;
 }
 
 /**
@@ -1028,12 +1043,15 @@ __attribute__((used)) void gimbal_init(gimbal_control_t *control)
 
     control->gimbal_yaw_motor.max_relative_angle = YAW_MAX_RELATIVE_ANGLE;
     control->gimbal_yaw_motor.min_relative_angle = YAW_MIN_RELATIVE_ANGLE;
-    control->gimbal_pitch_motor.max_relative_angle = PITCH_MAX_RELATIVE_ANGLE;
-    control->gimbal_pitch_motor.min_relative_angle = PITCH_MIN_RELATIVE_ANGLE;
+    control->gimbal_pitch_motor.max_relative_angle = 0.0f;
+    control->gimbal_pitch_motor.min_relative_angle = 0.0f;
     control->gimbal_yaw_motor.inertia_kgm2 = YAW_INERTIA_KGM2;
     control->gimbal_pitch_motor.inertia_kgm2 = PITCH_INERTIA_KGM2;
 		
 //		Motor_MIT_MODE(&hfdcan1, DM_YAW_CAN_ID);
+    gimbal_pid_init(&small_yaw_angle_pid, 6.0f, 0.0f, 0.05f, 1.5f, 0.0f);
+    gimbal_pid_init(&small_yaw_speed_pid, 0.015f, 0.0005f, 0.0002f,
+                    SMALL_YAW_6020_CURRENT_LIMIT_A, 1.0f);
     Motor_ENABLE(&hfdcan1, DM_BIG_YAW_CAN_ID);
 //		Motor_MIT_MODE(&hfdcan2, DM_PIT_CAN_ID);
     Motor_ENABLE(&hfdcan2, DM_PIT_CAN_ID);
@@ -1091,8 +1109,6 @@ __attribute__((used)) void gimbal_set_mode(gimbal_control_t *control)
   */
 __attribute__((used)) void gimbal_feedback_update(gimbal_control_t *control)
 {
-    float chassis_yaw = 0.0f;
-    float yaw_relative = 0.0f;
     float pitch_motor_pos = 0.0f;
     float yaw_gyro_last = 0.0f;
     float pitch_gyro_last = 0.0f;
@@ -1107,6 +1123,8 @@ __attribute__((used)) void gimbal_feedback_update(gimbal_control_t *control)
         return;
     }
 
+    small_yaw_feedback_update();
+
     if (control->gimbal_INT_angle_point != 0)
     {
         control->gimbal_yaw_motor.absolute_angle =
@@ -1116,16 +1134,18 @@ __attribute__((used)) void gimbal_feedback_update(gimbal_control_t *control)
             pitch_motor_pos = MIT_MOTOR_MEASURE[GIMBAL_PITCH_MIT_INDEX].fdb.pos;
         }
 
-        chassis_yaw = hwt101_get_yaw_total_rad();
-
-        if (control->gimbal_yaw_motor.angle_offset_init == 0u)
+        if (gimbal_yaw_online() != 0u &&
+            MIT_MOTOR_MEASURE[GIMBAL_YAW_MIT_INDEX].fdb.last_fdb_time != 0U &&
+            control->gimbal_yaw_motor.angle_offset_init == 0u)
         {
-            control->gimbal_yaw_motor.angle_offset = 0.0f;
+            control->gimbal_yaw_motor.angle_offset = GIMBAL_ROLL_YAW_SAFE_ANGLE_RAD;
 
-            control->gimbal_yaw_motor.relative_angle = 0.0f;
-            control->gimbal_yaw_motor.relative_angle_set = 0.0f;
-            control->gimbal_yaw_motor.rc_relative_angle_set = 0.0f;
-            control->gimbal_yaw_motor.auto_relative_angle_set = 0.0f;
+            control->gimbal_yaw_motor.relative_angle = yaw_pitch_direct_wrap_angle(
+                MIT_MOTOR_MEASURE[GIMBAL_YAW_MIT_INDEX].fdb.pos -
+                control->gimbal_yaw_motor.angle_offset);
+            control->gimbal_yaw_motor.relative_angle_set = control->gimbal_yaw_motor.relative_angle;
+            control->gimbal_yaw_motor.rc_relative_angle_set = control->gimbal_yaw_motor.relative_angle;
+            control->gimbal_yaw_motor.auto_relative_angle_set = control->gimbal_yaw_motor.relative_angle;
             control->gimbal_yaw_motor.absolute_angle_set =
                 control->gimbal_yaw_motor.absolute_angle;
             control->gimbal_yaw_motor.rc_absolute_angle_set =
@@ -1134,15 +1154,13 @@ __attribute__((used)) void gimbal_feedback_update(gimbal_control_t *control)
                 control->gimbal_yaw_motor.absolute_angle;
             control->gimbal_yaw_motor.angle_offset_init = 1u;
         }
-        else
+        else if (gimbal_yaw_online() != 0u &&
+                 control->gimbal_yaw_motor.angle_offset_init != 0u)
         {
-            yaw_relative =
-                control->gimbal_yaw_motor.absolute_angle -
-                chassis_yaw -
-                control->gimbal_yaw_motor.angle_offset;
-
             control->gimbal_yaw_motor.relative_angle =
-                yaw_pitch_direct_wrap_angle(yaw_relative);
+                yaw_pitch_direct_wrap_angle(
+                    MIT_MOTOR_MEASURE[GIMBAL_YAW_MIT_INDEX].fdb.pos -
+                    control->gimbal_yaw_motor.angle_offset);
         }
 
         if (pitch_feedback_ready == 0u)
@@ -1173,9 +1191,7 @@ __attribute__((used)) void gimbal_feedback_update(gimbal_control_t *control)
         }
         else
         {
-            /* MIT pitch 电机正方向与机械 pitch 正方向相同：
-             * 上电机械零位为 0，按右手系 pitch 正方向计角。
-             */
+            /* pitch 相对角以本次上电位置为零点。 */
             control->gimbal_pitch_motor.absolute_angle =
                 pitch_motor_pos -
                 control->gimbal_pitch_motor.angle_offset;
@@ -1203,6 +1219,14 @@ __attribute__((used)) void gimbal_feedback_update(gimbal_control_t *control)
                 control->gimbal_pitch_motor.relative_angle_last =
                     control->gimbal_pitch_motor.relative_angle;
             }
+        }
+        if (control->gimbal_pitch_motor.angle_offset_init != 0u)
+        {
+            /* 电机反馈角 1.0 rad 抬头、1.85 rad 低头，限位换算到上电相对角。 */
+            control->gimbal_pitch_motor.min_relative_angle =
+                PITCH_HEAD_UP_MOTOR_ANGLE_RAD - control->gimbal_pitch_motor.angle_offset;
+            control->gimbal_pitch_motor.max_relative_angle =
+                PITCH_HEAD_DOWN_MOTOR_ANGLE_RAD - control->gimbal_pitch_motor.angle_offset;
         }
     }
 
@@ -1323,7 +1347,8 @@ __attribute__((used)) void gimbal_set_control(gimbal_control_t *control)
     }
 
     gimbal_behaviour_control_set(&add_yaw, &add_pitch, control);
-    auto_enable = auto_aim_is_active();
+    auto_enable = (uint8_t)((gimbal_behaviour == GIMBAL_AUTO_SENTINEL) &&
+                            (auto_aim_is_active() != 0U));
     yaw_rc_enable =
         (uint8_t)((auto_enable == 0u) || (add_yaw != 0.0f));
     pitch_rc_enable =
@@ -1527,6 +1552,11 @@ __attribute__((used)) void gimbal_set_control(gimbal_control_t *control)
                                             GIMBAL_CONTROL_SOURCE_AUTO);
         }
     }
+
+    if (gimbal_behaviour == GIMBAL_AUTO_SENTINEL)
+    {
+        small_yaw_scan_update(control, auto_enable, add_yaw, add_pitch);
+    }
 }
 
 /**
@@ -1541,7 +1571,7 @@ __attribute__((used)) void gimbal_control_loop(gimbal_control_t *control)
     }
 
     if ((control->gimbal_yaw_motor.mode == GIMBAL_MOTOR_RAW) ||
-        (gimbal_yaw_online() == 0u))
+        (gimbal_yaw_online() == 0u) || toe_is_error(DBUS_TOE))
     {
         /* RAW 无力模式和 yaw 离线保护直接零输出，不进入 yaw 闭环。 */
         gimbal_motor_zero_output(&control->gimbal_yaw_motor);
@@ -1574,6 +1604,8 @@ __attribute__((used)) void gimbal_control_loop(gimbal_control_t *control)
     {
         gimbal_motor_relative_angle_control(&control->gimbal_pitch_motor);
     }
+
+    small_yaw_control_update();
 }
 
 /**
@@ -1582,6 +1614,9 @@ __attribute__((used)) void gimbal_control_loop(gimbal_control_t *control)
   */
 __attribute__((used)) void gimbal_send_cmd(gimbal_control_t *control)
 {
+    static float roll_position_set = 0.0f;
+    static uint32_t roll_last_tick = 0U;
+    static uint8_t roll_target_init = 0U;
     float yaw_cmd_torque;
     float pitch_cmd_torque;
 
@@ -1591,7 +1626,7 @@ __attribute__((used)) void gimbal_send_cmd(gimbal_control_t *control)
     }
 
     if ((control->gimbal_yaw_motor.mode == GIMBAL_MOTOR_RAW) ||
-        (gimbal_yaw_online() == 0u))
+        (gimbal_yaw_online() == 0u) || toe_is_error(DBUS_TOE))
     {
         yaw_can_set_current = 0.0f;
     }
@@ -1601,7 +1636,7 @@ __attribute__((used)) void gimbal_send_cmd(gimbal_control_t *control)
     }
 
     if ((control->gimbal_pitch_motor.mode == GIMBAL_MOTOR_RAW) ||
-        (gimbal_pitch_mit_feedback_ready() == 0u))
+        (gimbal_pitch_mit_feedback_ready() == 0u) || toe_is_error(DBUS_TOE))
     {
         pitch_can_set_current = 0.0f;
     }
@@ -1615,5 +1650,176 @@ __attribute__((used)) void gimbal_send_cmd(gimbal_control_t *control)
 
     CAN_cmd_MIT(&hfdcan1, DM_BIG_YAW_CAN_ID, 0.0f, 0.0f, 0.0f, 0.0f, yaw_cmd_torque);
     CAN_cmd_MIT(&hfdcan2, DM_PIT_CAN_ID, 0.0f, 0.0f, 0.0f, 0.0f, pitch_cmd_torque);
+    {
+        const MITMeasure_t *roll = &MIT_MOTOR_MEASURE[GIMBAL_ROLL_MIT_INDEX];
+        const MITMeasure_t *yaw = &MIT_MOTOR_MEASURE[GIMBAL_YAW_MIT_INDEX];
+        const uint32_t now = HAL_GetTick();
+        const float yaw_error = rad_format(yaw->fdb.pos - GIMBAL_ROLL_YAW_SAFE_ANGLE_RAD);
+        const uint8_t feedback_ready = (uint8_t)(
+            roll->fdb.last_fdb_time != 0U &&
+            now - roll->fdb.last_fdb_time <= GIMBAL_ROLL_FEEDBACK_TIMEOUT_MS &&
+            yaw->fdb.last_fdb_time != 0U &&
+            now - yaw->fdb.last_fdb_time <= GIMBAL_ROLL_FEEDBACK_TIMEOUT_MS &&
+            toe_is_error(ROLL_GIMBAL_MOTOR_TOE) == 0U &&
+            toe_is_error(YAW_GIMBAL_MOTOR_TOE) == 0U &&
+            fabsf(yaw_error) <= GIMBAL_YAW_ORIGIN_TOLERANCE);
+
+        if (gimbal_roll_control_is_allowed() &&
+            gimbal_roll_motion_is_active() &&
+            feedback_ready != 0U &&
+            !toe_is_error(DBUS_TOE))
+        {
+            const float target = gimbal_roll_target_is_lifted() ?
+                                 GIMBAL_ROLL_LIFT_ANGLE_RAD : GIMBAL_ROLL_LOWER_ANGLE_RAD;
+            const float max_step = GIMBAL_ROLL_MOVE_SPEED_RAD_S *
+                                   (float)(now - roll_last_tick) * 0.001f;
+            const float remaining = target - roll_position_set;
+
+            if (roll_target_init == 0U)
+            {
+                roll_position_set = roll->fdb.pos;
+                roll_target_init = 1U;
+            }
+            else if (fabsf(remaining) <= max_step)
+            {
+                roll_position_set = target;
+            }
+            else
+            {
+                roll_position_set += (remaining > 0.0f) ? max_step : -max_step;
+            }
+            roll_last_tick = now;
+
+            if (fabsf(target - roll->fdb.pos) <= GIMBAL_ROLL_ARRIVE_ERROR_RAD &&
+                fabsf(roll->fdb.vel) <= GIMBAL_ROLL_ARRIVE_SPEED_RAD_S)
+            {
+                gimbal_roll_motion_complete();
+                roll_target_init = 0U;
+                CAN_cmd_MIT(&hfdcan2, DM_ROLL_CAN_ID, target, 0.0f,
+                            GIMBAL_ROLL_POSITION_KP, GIMBAL_ROLL_POSITION_KD,
+                            gimbal_roll_target_is_lifted() ? 1.0f : 0.0f);
+            }
+            else
+            {
+                CAN_cmd_MIT(&hfdcan2, DM_ROLL_CAN_ID, roll_position_set, 0.0f,
+                            GIMBAL_ROLL_POSITION_KP, GIMBAL_ROLL_POSITION_KD,
+                            gimbal_roll_target_is_lifted() ? 1.0f : 0.0f);
+            }
+        }
+        else
+        {
+            if (gimbal_roll_motion_is_active())
+            {
+                gimbal_roll_motion_cancel();
+            }
+            roll_target_init = 0U;
+            roll_last_tick = now;
+            if (gimbal_roll_control_is_allowed() &&
+                feedback_ready != 0U &&
+                !toe_is_error(DBUS_TOE))
+            {
+                const float hold_target = gimbal_roll_is_lifted() ?
+                                          GIMBAL_ROLL_LIFT_ANGLE_RAD :
+                                          GIMBAL_ROLL_LOWER_ANGLE_RAD;
+                CAN_cmd_MIT(&hfdcan2, DM_ROLL_CAN_ID, hold_target, 0.0f,
+                            GIMBAL_ROLL_POSITION_KP, GIMBAL_ROLL_POSITION_KD,
+                            gimbal_roll_is_lifted() ? 1.0f : 0.0f);
+            }
+            else
+            {
+                CAN_cmd_MIT(&hfdcan2, DM_ROLL_CAN_ID, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+            }
+        }
+    }
+    {
+        uint8_t data[8] = {0};
+        int16_t cmd = 0;
+        if (control->gimbal_yaw_motor.mode != GIMBAL_MOTOR_RAW &&
+            !toe_is_error(DBUS_TOE) &&
+            DJI_MOTOR_MEASURE[3].last_fdb_time != 0U &&
+            (HAL_GetTick() - DJI_MOTOR_MEASURE[3].last_fdb_time) <= 100U)
+        {
+            cmd = small_yaw_current_to_cmd(small_yaw_speed_pid.out);
+        }
+        data[0] = (uint8_t)((uint16_t)cmd >> 8);
+        data[1] = (uint8_t)cmd;
+        canx_send_data(&hfdcan2, 0x1FFU, data, 8U);
+    }
+}
+
+static void small_yaw_feedback_update(void)
+{
+    const motor_measure_t *measure = &DJI_MOTOR_MEASURE[3];
+    uint16_t ecd = measure->ecd;
+    int16_t delta;
+    if (measure->last_fdb_time == 0U)
+    {
+        return;
+    }
+    if (small_yaw_feedback_init == 0U)
+    {
+        delta = (int16_t)ecd - (int16_t)SMALL_YAW_FORWARD_ECD;
+        if (delta > 4096) delta -= 8192;
+        if (delta < -4096) delta += 8192;
+        small_yaw_angle_rad = (float)delta * (2.0f * YAW_PITCH_DIRECT_PI / 8192.0f);
+        small_yaw_target_rad = small_yaw_angle_rad;
+        small_yaw_last_ecd = ecd;
+        small_yaw_feedback_init = 1U;
+        return;
+    }
+    delta = (int16_t)(ecd - small_yaw_last_ecd);
+    if (delta > 4096) delta -= 8192;
+    if (delta < -4096) delta += 8192;
+    small_yaw_angle_rad += (float)delta * (2.0f * YAW_PITCH_DIRECT_PI / 8192.0f);
+    small_yaw_last_ecd = ecd;
+}
+
+static void small_yaw_scan_update(gimbal_control_t *control, uint8_t auto_enable, float add_yaw, float add_pitch)
+{
+    const float dt = (float)GIMBAL_CONTROL_TIME * 0.001f;
+    if (auto_enable != 0U)
+    {
+        small_yaw_target_rad = small_yaw_angle_rad + auto_aim_get_yaw_err_rad();
+        small_yaw_target_rad = gimbal_mit_clamp(small_yaw_target_rad,
+                                                -SMALL_YAW_SCAN_LIMIT_RAD,
+                                                SMALL_YAW_SCAN_LIMIT_RAD);
+        return;
+    }
+    if (fabsf(add_yaw) > 0.0001f || fabsf(add_pitch) > 0.0001f)
+    {
+        return;
+    }
+    small_yaw_target_rad += (scan_yaw_direction != 0U ? 1.0f : -1.0f) * SMALL_YAW_SCAN_SPEED_RAD_S * dt;
+    scan_pitch_target_rad += (scan_pitch_direction != 0U ? 1.0f : -1.0f) * PITCH_SCAN_SPEED_RAD_S * dt;
+    if (small_yaw_target_rad >= SMALL_YAW_SCAN_LIMIT_RAD) { small_yaw_target_rad = SMALL_YAW_SCAN_LIMIT_RAD; scan_yaw_direction = 0U; }
+    if (small_yaw_target_rad <= -SMALL_YAW_SCAN_LIMIT_RAD) { small_yaw_target_rad = -SMALL_YAW_SCAN_LIMIT_RAD; scan_yaw_direction = 1U; }
+    if (scan_pitch_target_rad >= PITCH_SCAN_LIMIT_RAD) { scan_pitch_target_rad = PITCH_SCAN_LIMIT_RAD; scan_pitch_direction = 0U; }
+    if (scan_pitch_target_rad <= -PITCH_SCAN_LIMIT_RAD) { scan_pitch_target_rad = -PITCH_SCAN_LIMIT_RAD; scan_pitch_direction = 1U; }
+    small_yaw_target_rad = gimbal_mit_clamp(small_yaw_target_rad, -SMALL_YAW_SCAN_LIMIT_RAD, SMALL_YAW_SCAN_LIMIT_RAD);
+    control->gimbal_pitch_motor.absolute_angle_set = gimbal_mit_clamp(scan_pitch_target_rad, -PITCH_SCAN_LIMIT_RAD, PITCH_SCAN_LIMIT_RAD);
+}
+
+static void small_yaw_control_update(void)
+{
+    float speed_set;
+    float speed_rads;
+
+    if (!gimbal_small_yaw_control_is_allowed())
+    {
+        small_yaw_speed_pid.out = 0.0f;
+        return;
+    }
+
+    speed_set = gimbal_pid_calc(&small_yaw_angle_pid, small_yaw_angle_rad, small_yaw_target_rad, 0.0f);
+    speed_rads = (float)DJI_MOTOR_MEASURE[3].speed_rpm * (2.0f * YAW_PITCH_DIRECT_PI / 60.0f);
+    (void)gimbal_pid_calc(&small_yaw_speed_pid, speed_rads, speed_set, 0.0f);
+}
+
+static int16_t small_yaw_current_to_cmd(float current_a)
+{
+    float cmd = current_a * (16384.0f / SMALL_YAW_6020_CURRENT_LIMIT_A);
+    if (cmd > 16384.0f) cmd = 16384.0f;
+    if (cmd < -16384.0f) cmd = -16384.0f;
+    return (int16_t)cmd;
 }
 #endif

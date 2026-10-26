@@ -184,21 +184,29 @@ __attribute__((used)) void chassis_feedback_update(chassis_move_t *chassis_move_
 
 	if ((hwt906 != NULL) && (hwt906->angle.yaw_init_flag != 0u))
 	{
-		chassis_move_update->chassis_yaw = hwt906->angle.yaw_total_rad;
-		chassis_move_update->chassis_yaw_rate =
-			CHASSIS_YAW_RATE_FEEDBACK_SIGN * hwt906->gyro.radps[HWT_AXIS_YAW];
+		if ((chassis_move_update->chassis_yaw_motor != NULL) &&
+		    (chassis_move_update->chassis_yaw_motor->angle_offset_init != 0u) &&
+		    (toe_is_error(YAW_GIMBAL_MOTOR_TOE) == 0U))
+		{
+			/* 云台绝对航向减大 yaw 关节角，得到底盘航向。 */
+			chassis_move_update->chassis_yaw = hwt906->angle.yaw_total_rad -
+				chassis_move_update->chassis_yaw_motor->relative_angle;
+			chassis_move_update->chassis_yaw_rate =
+				CHASSIS_YAW_RATE_FEEDBACK_SIGN * hwt906->gyro.radps[HWT_AXIS_YAW] -
+				MIT_MOTOR_MEASURE[GIMBAL_YAW_MIT_INDEX].fdb.vel;
+		}
 		chassis_move_update->chassis_pitch = rad_format(hwt906->angle.rad[HWT_AXIS_PITCH]);
 		chassis_move_update->chassis_roll = rad_format(hwt906->angle.rad[HWT_AXIS_ROLL]);
 	}
 
 	if ((chassis_move_update->chassis_yaw_motor != NULL) &&
-	    (chassis_move_update->chassis_yaw_motor->angle_offset_init != 0u))
+	    (chassis_move_update->chassis_yaw_motor->angle_offset_init != 0u) &&
+	    (toe_is_error(YAW_GIMBAL_MOTOR_TOE) == 0U))
 	{
 		chassis_move_update->chassis_relative_angle =
 			rad_format(chassis_move_update->chassis_yaw_motor->relative_angle);
 		chassis_move_update->chassis_relative_angle_vel =
-			chassis_move_update->chassis_yaw_motor->gyro -
-			chassis_move_update->chassis_yaw_rate;
+			MIT_MOTOR_MEASURE[GIMBAL_YAW_MIT_INDEX].fdb.vel;
 		chassis_move_update->gimbal_radian_of_ecd = chassis_move_update->chassis_relative_angle;
 	}
 	else
@@ -216,6 +224,8 @@ __attribute__((used)) void chassis_init(chassis_move_t *chassis_move_init)
 	if (chassis_move_init == NULL) return;
 
 	chassis_move_init->chassis_mode = CHASSIS_VECTOR_NO_MOVE;
+	chassis_move_init->spin_start_tick = 0U;
+	chassis_move_init->spin_wave_active = 0U;
 	chassis_move_init->chassis_RC = get_remote_control_point();
 	chassis_move_init->chassis_INS_angle = hwt906_get_gimbal_angle_point();
 	chassis_move_init->chassis_yaw_motor = get_yaw_motor_point();
@@ -387,10 +397,30 @@ __attribute__((used)) void chassis_set_contorl(chassis_move_t *chassis_move_cont
 	}
 	else if (chassis_move_control->chassis_mode == CHASSIS_VECTOR_SPIN)
 	{
-		chassis_move_control->wz_set = wz_set;
+		const hwt_imu_info_t *hwt906 = hwt906_get_info();
+		if ((hwt906 == NULL) || (hwt906->angle.yaw_init_flag == 0u) ||
+		    (chassis_move_control->chassis_yaw_motor == NULL) ||
+		    (chassis_move_control->chassis_yaw_motor->angle_offset_init == 0u) ||
+		    (toe_is_error(YAW_GIMBAL_MOTOR_TOE) != 0U) ||
+		    (MIT_MOTOR_MEASURE[GIMBAL_YAW_MIT_INDEX].fdb.last_fdb_time == 0U) ||
+		    (chassis_move_control->chassis_relative_angle <=
+		     chassis_move_control->chassis_yaw_motor->min_relative_angle + CHASSIS_SPIN_YAW_LIMIT_MARGIN_RAD) ||
+		    (chassis_move_control->chassis_relative_angle >=
+		     chassis_move_control->chassis_yaw_motor->max_relative_angle - CHASSIS_SPIN_YAW_LIMIT_MARGIN_RAD))
+		{
+			chassis_move_control->vx_set = 0.0f;
+			chassis_move_control->vy_set = 0.0f;
+			chassis_move_control->wz_set = 0.0f;
+			return;
+		}
 
-		chassis_move_control->vx_set = fp32_constrain(vx_set, chassis_move_control->vx_min_speed, chassis_move_control->vx_max_speed);
-		chassis_move_control->vy_set = fp32_constrain(vy_set, chassis_move_control->vy_min_speed, chassis_move_control->vy_max_speed);
+		/* 遥控平移以大云台朝前为参考，换算到底盘自身坐标。 */
+		vector[0] = vx_set;
+		vector[1] = vy_set;
+		vector_rotate(chassis_move_control->chassis_relative_angle, vector);
+		chassis_move_control->vx_set = fp32_constrain(vector[0], chassis_move_control->vx_min_speed, chassis_move_control->vx_max_speed);
+		chassis_move_control->vy_set = fp32_constrain(vector[1], chassis_move_control->vy_min_speed, chassis_move_control->vy_max_speed);
+		chassis_move_control->wz_set = wz_set;
 	}
 }
 

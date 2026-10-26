@@ -26,10 +26,8 @@ extern "C" {
 #define HWT_GIMBAL_PITCH_INDEX  1u
 #define HWT_GIMBAL_ROLL_INDEX   2u
 
-#define IMU101_RX_BUF_LEN  64
 #define IMU906_RX_BUF_LEN  64
 
-extern uint8_t imu101_rx_buf[IMU101_RX_BUF_LEN];
 extern uint8_t imu906_rx_buf[IMU906_RX_BUF_LEN];
 
 typedef struct
@@ -85,14 +83,6 @@ typedef struct
 void hwt_imu_init(void);
 
 /**
-  * @brief          101 串口接收数据解包
-  * @param[in]      data: 串口收到的数据缓冲区
-  * @param[in]      len:  数据长度
-  * @retval         none
-  */
-void hwt101_rx_parse(const uint8_t *data, uint16_t len);
-
-/**
   * @brief          906 串口接收数据解包
   * @param[in]      data: 串口收到的数据缓冲区
   * @param[in]      len:  数据长度
@@ -101,46 +91,11 @@ void hwt101_rx_parse(const uint8_t *data, uint16_t len);
 void hwt906_rx_parse(const uint8_t *data, uint16_t len);
 
 /**
-  * @brief          获取 101 完整信息
-  * @param[in]      none
-  * @retval         101 信息结构体指针
-  */
-const hwt_imu_info_t *hwt101_get_info(void);
-
-/**
   * @brief          获取 906 完整信息
   * @param[in]      none
   * @retval         906 信息结构体指针
   */
 const hwt_imu_info_t *hwt906_get_info(void);
-
-/**
-  * @brief          获取 101 原始 yaw
-  * @param[in]      none
-  * @retval         yaw(rad)，范围约 [-pi, pi]
-  */
-float hwt101_get_yaw_rad(void);
-
-/**
-  * @brief          获取 101 原始 yaw
-  * @param[in]      none
-  * @retval         yaw(deg)，范围约 [-180, 180]
-  */
-float hwt101_get_yaw_deg(void);
-
-/**
-  * @brief          获取 101 连续 yaw
-  * @param[in]      none
-  * @retval         yaw(rad)
-  */
-float hwt101_get_yaw_total_rad(void);
-
-/**
-  * @brief          获取 101 连续 yaw
-  * @param[in]      none
-  * @retval         yaw(deg)
-  */
-float hwt101_get_yaw_total_deg(void);
 
 /**
   * @brief          获取 906 原始 yaw
@@ -185,13 +140,6 @@ float hwt906_get_yaw_deg(void);
 float hwt906_get_pitch_deg(void);
 
 /**
-  * @brief          获取底盘 yaw 指针，来自 101
-  * @param[in]      none
-  * @retval         单元素数组指针，point[0] = 连续 yaw(rad)
-  */
-const float *hwt101_get_chassis_yaw_point(void);
-
-/**
   * @brief          获取云台角度指针，来自 906
   * @param[in]      none
   * @retval         point[0] = 连续 yaw(rad), point[1] = pitch(rad)
@@ -211,13 +159,6 @@ const float *hwt906_get_gimbal_gyro_point(void);
   * @retval         point[0] = ax(m/s^2), point[1] = ay(m/s^2), point[2] = az(m/s^2)
   */
 const float *hwt906_get_gimbal_accel_point(void);
-
-/**
-  * @brief          清除 101 更新标志
-  * @param[in]      none
-  * @retval         none
-  */
-void hwt101_clear_update_flag(void);
 
 /**
   * @brief          清除 906 更新标志

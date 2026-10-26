@@ -9,6 +9,7 @@
 #include "cmsis_os.h"
 #include "gimbal_behaviour.h"
 #include "robot_param.h"
+#include "stm32h7xx_hal.h"
 #include <math.h>
 #include <stdbool.h>
 
@@ -47,48 +48,22 @@ void chassis_behaviour_mode_set(chassis_move_t *chassis_move_mode)
 {
 	if (chassis_move_mode == NULL) return;
 
-// 预留底盘回正模式。
-	//CHASSIS_ZERO_FORCE, CHASSIS_NO_MOVE, CHASSIS_FOLLOW_GIMBAL_YAW, CHASSIS_OPEN, CHASSIS_SPIN
-	if (switch_is_down(chassis_move_mode->chassis_RC->rc.s[CHASSIS_MODE_CHANNEL]) || chassis_move_mode->chassis_return_flag == 0)
+	/* s0 mode state is provided by the gimbal behavior layer. */
+	switch (gimbal_total_mode_get())
 	{
-		chassis_behaviour_mode = CHASSIS_YAW_HOLD;	// 底盘 yaw 目标角闭环模式
-	}
-	else if (switch_is_mid(chassis_move_mode->chassis_RC->rc.s[CHASSIS_MODE_CHANNEL]))
-	{
-		chassis_behaviour_mode = CHASSIS_NO_MOVE;	// 静止模式
-	}
-	else if (switch_is_up(chassis_move_mode->chassis_RC->rc.s[CHASSIS_MODE_CHANNEL]) && !switch_is_down(chassis_move_mode->chassis_RC->rc.s[1]))	// 模式说明
-	{
-		chassis_behaviour_mode = CHASSIS_SPIN;	// 小陀螺模式
-	}
-
-//	if (switch_is_down(chassis_move_mode->chassis_RC->rc.s[0]) && switch_is_down(chassis_move_mode->chassis_RC->rc.s[1]) && chassis_move_mode->chassis_return_flag == 1)
-//	{
-// chassis_behaviour_mode = CHASSIS_RETURN; // 预留底盘回正模式
-//	}
-
-	if (chassis_move_mode->chassis_RC->rc.s[1] != 2)
-	{
-		chassis_move_mode->chassis_return_flag = 1;
+	case GIMBAL_TOTAL_FOLLOW:
+		chassis_behaviour_mode = CHASSIS_FOLLOW_GIMBAL_YAW;
+		break;
+	case GIMBAL_TOTAL_SPIN:
+	case GIMBAL_TOTAL_AUTO_SENTINEL:
+		chassis_behaviour_mode = CHASSIS_SPIN;
+		break;
+	case GIMBAL_TOTAL_MOTIONLESS:
+	default:
+		chassis_behaviour_mode = CHASSIS_NO_MOVE;
+		break;
 	}
 
-	/* 遥控器处于下档时，通过键盘按键实时刷新底盘行为模式。 */
-	if (switch_is_down(chassis_move_mode->chassis_RC->rc.s[CHASSIS_MODE_CHANNEL]) && (chassis_move_mode->chassis_RC->key.v & GIMBAL_ZERO_KEYBOARD))
-	{
-		chassis_behaviour_mode = CHASSIS_NO_MOVE;		//x 键静止模式
-	}
-	else if (switch_is_down(chassis_move_mode->chassis_RC->rc.s[CHASSIS_MODE_CHANNEL]) && (chassis_move_mode->chassis_RC->key.v & GIMBAL_RELATIVE_KEYBOARD))
-	{
-		chassis_behaviour_mode = CHASSIS_FOLLOW_GIMBAL_YAW;		//c 键跟随云台模式
-	}
-	else if(switch_is_down(chassis_move_mode->chassis_RC->rc.s[CHASSIS_MODE_CHANNEL]) && (chassis_move_mode->chassis_RC->key.v & GIMBAL_SPIN_KEYBOARD))
-	{
-		chassis_behaviour_mode = CHASSIS_SPIN;	//shift 键小陀螺模式
-	}
-//	else if(switch_is_down(chassis_move_mode->chassis_RC->rc.s[CHASSIS_MODE_CHANNEL]) && (chassis_move_mode->chassis_RC->key.v & GIMBAL_RETURN_KEYBOARD))
-//	{
-//		chassis_behaviour_mode = CHASSIS_RETURN;	//z 键回正模式
-//	}
 
 	// 根据行为模式选择底盘控制模式。
 	if (chassis_behaviour_mode == CHASSIS_NO_MOVE)	//闈欐妯″紡
@@ -132,6 +107,10 @@ void chassis_behaviour_control_set(fp32 *vx_set, fp32 *vy_set, fp32 *wz_set, cha
 {
 	if (vx_set == NULL || vy_set == NULL || wz_set == NULL || chassis_move_rc_to_vector == NULL) return;
 
+	if (chassis_behaviour_mode != CHASSIS_SPIN)
+	{
+		chassis_move_rc_to_vector->spin_wave_active = 0U;
+	}
 
 	if (chassis_behaviour_mode == CHASSIS_NO_MOVE)
 	{
@@ -199,21 +178,32 @@ static void chassis_yaw_hold_control(fp32 *vx_set, fp32 *vy_set, fp32 *wz_set, c
 	*wz_set = (fp32)wz_channel;
 }
 
-fp32 chassis_spin_speed = CHASSIS_SPIN_SPEED;
-
 /**
   * @brief          小陀螺模式速度给定
   * @retval         none
   */
 static void chassis_spin_control(fp32 *vx_set, fp32 *vy_set, fp32 *wz_set, chassis_move_t *chassis_move_rc_to_vector)
 {
+	uint32_t elapsed_ms;
+	float phase;
+
 	if (vx_set == NULL || vy_set == NULL || wz_set == NULL || chassis_move_rc_to_vector == NULL) return;
 
 	// 根据遥控器通道和键盘输入生成平移速度给定。
 	chassis_rc_to_control_vector(vx_set, vy_set, chassis_move_rc_to_vector);
 
-	// 设置小陀螺固定自转速度。
-	*wz_set = CHASSIS_SPIN_SPEED;
+	// 首次进入小陀螺时记录正弦变速起点。
+	if (!chassis_move_rc_to_vector->spin_wave_active)
+	{
+		chassis_move_rc_to_vector->spin_start_tick = HAL_GetTick();
+		chassis_move_rc_to_vector->spin_wave_active = 1U;
+	}
+
+	elapsed_ms = HAL_GetTick() - chassis_move_rc_to_vector->spin_start_tick;
+	phase = 2.0f * PI *
+			((float)(elapsed_ms % CHASSIS_SPIN_PERIOD_MS) / (float)CHASSIS_SPIN_PERIOD_MS);
+	*wz_set = CHASSIS_SPIN_MIN_SPEED +
+			0.5f * (CHASSIS_SPIN_SPEED - CHASSIS_SPIN_MIN_SPEED) * (1.0f + sinf(phase));
 
 	return;
 }

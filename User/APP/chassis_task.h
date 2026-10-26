@@ -65,6 +65,8 @@ typedef struct
 
     chassis_mode_e chassis_mode;
     chassis_mode_e last_chassis_mode;
+    uint32_t spin_start_tick; /**< 小陀螺正弦变速起始时间（ms）。 */
+    uint8_t spin_wave_active; /**< 小陀螺正弦变速启动标志，1 为已启动。 */
 
     chassis_motor_t chassis_3508[CHASSIS_MODULE_NUM];
     wheel_angle_offset_t wheel_angle_offset;
