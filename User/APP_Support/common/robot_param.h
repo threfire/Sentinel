@@ -200,7 +200,7 @@ extern "C" {
 #define GIMBAL_ROLL_LIFT_ANGLE_RAD          -0.0768f    // roll 抬起位置（rad）
 #define GIMBAL_ROLL_LOWER_ANGLE_RAD         -1.8222f    // roll 倒下位置（rad）
 #define GIMBAL_ROLL_MOVE_SPEED_RAD_S        0.5f        // roll 抬放目标角最大变化速度（rad/s）
-#define GIMBAL_ROLL_POSITION_KP             2.0f        // roll MIT 位置比例系数
+#define GIMBAL_ROLL_POSITION_KP             3.0f        // roll MIT 位置比例系数
 #define GIMBAL_ROLL_POSITION_KD             0.5f        // roll MIT 速度阻尼系数
 #define GIMBAL_ROLL_ARRIVE_ERROR_RAD        0.03f       // roll 到位角度误差（rad）
 #define GIMBAL_ROLL_ARRIVE_SPEED_RAD_S      0.1f        // roll 到位角速度阈值（rad/s）

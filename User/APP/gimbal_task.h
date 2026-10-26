@@ -102,6 +102,17 @@ typedef struct
     uint8_t step;
 } gimbal_step_cali_t;
 
+typedef struct
+{
+    uint8_t total_mode;
+    bool roll_lifted;
+    bool roll_target_lifted;
+    bool roll_motion_active;
+    bool roll_control_allowed;
+    bool friction_enabled;
+    bool strum_enabled;
+} gimbal_behaviour_state_t;
+
 typedef struct gimbal_control_t
 {
     const RC_ctrl_t *gimbal_rc_ctrl;
@@ -112,6 +123,7 @@ typedef struct gimbal_control_t
     gimbal_motor_t gimbal_pitch_motor;
     gimbal_step_cali_t gimbal_cali;
     gravity_comp_t gimbal_pitch_gravity_comp;
+    gimbal_behaviour_state_t behaviour_state;
 } gimbal_control_t;
 
 extern gimbal_control_t gimbal_control;
