@@ -70,13 +70,10 @@ static void gimbal_remote_state_update(const gimbal_control_t *control)
         {
             s0_up_count = 1U;
             last_s0_up_tick = now;
-            gimbal_total_mode = gimbal_roll_lifted ?
-                                 GIMBAL_TOTAL_SPIN :
-                                 GIMBAL_TOTAL_MOTIONLESS;
         }
     }
-    else if (switch_is_mid(s0) && s0_up_count == 1U &&
-             (now - last_s0_up_tick) > GIMBAL_AUTO_SENTINEL_REPEAT_WINDOW_MS)
+    if (s0_up_count == 1U &&
+        (now - last_s0_up_tick) > GIMBAL_AUTO_SENTINEL_REPEAT_WINDOW_MS)
     {
         s0_up_count = 0U;
     }
@@ -93,7 +90,7 @@ static void gimbal_remote_state_update(const gimbal_control_t *control)
     else if (switch_is_up(s0) && gimbal_total_mode != GIMBAL_TOTAL_AUTO_SENTINEL)
     {
         gimbal_total_mode = gimbal_roll_lifted ?
-                             GIMBAL_TOTAL_SPIN :
+                             (s0_up_count == 1U ? GIMBAL_TOTAL_FOLLOW : GIMBAL_TOTAL_SPIN) :
                              GIMBAL_TOTAL_MOTIONLESS;
     }
 
