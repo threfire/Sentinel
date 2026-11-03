@@ -8,7 +8,7 @@ extern "C" {
 #include <stdint.h>
 #include "struct_typedef.h"
 
-#define VOFA_CH_COUNT 6U
+#define VOFA_CH_COUNT 12U
 #define VOFA_CHASSIS_MOTOR_COUNT 4U
 #define VOFA_ENABLE_CSV_TEXT 0
 
@@ -32,6 +32,7 @@ void VOFA_SendGimbalYaw(void);
 void VOFA_SendGimbalPitch(void);
 void VOFA_SendGimbalYawPitchHalf(void);
 void VOFA_SendGimbalStrum(void);
+void VOFA_SendSmallYawDebug(void);
 
 
 #ifdef __cplusplus

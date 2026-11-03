@@ -19,6 +19,7 @@ volatile gimbal_behaviour_e gimbal_behaviour = GIMBAL_ZERO_FORCE;
 #define gimbal_roll_lifted           (gimbal_control.behaviour_state.roll_lifted)
 #define gimbal_roll_target_lifted    (gimbal_control.behaviour_state.roll_target_lifted)
 #define gimbal_roll_motion_active    (gimbal_control.behaviour_state.roll_motion_active)
+#define gimbal_roll_state_initialized (gimbal_control.behaviour_state.roll_state_initialized)
 #define gimbal_roll_control_allowed  (gimbal_control.behaviour_state.roll_control_allowed)
 #define gimbal_friction_enabled      (gimbal_control.behaviour_state.friction_enabled)
 #define gimbal_strum_enabled         (gimbal_control.behaviour_state.strum_enabled)
@@ -30,7 +31,10 @@ static void gimbal_remote_state_update(const gimbal_control_t *control)
     static uint16_t last_s1 = RC_SW_MID;
     static uint8_t s0_up_count = 0U;
     static uint8_t s1_down_count = 0U;
+    static bool s1_up_seen = false;
     static uint32_t last_s0_up_tick = 0U;
+    static uint32_t last_s1_down_tick = 0U;
+    static uint32_t s1_down_tick = 0U;
     uint16_t s0;
     uint16_t s1;
     uint32_t now;
@@ -50,6 +54,7 @@ static void gimbal_remote_state_update(const gimbal_control_t *control)
         initialized = true;
         last_s0 = s0;
         last_s1 = s1;
+        s1_up_seen = switch_is_up(s1);
     }
 
     if (switch_is_up(s0) && switch_is_mid(last_s0))
@@ -92,38 +97,62 @@ static void gimbal_remote_state_update(const gimbal_control_t *control)
                              GIMBAL_TOTAL_MOTIONLESS;
     }
 
-    if (gimbal_roll_control_allowed && switch_is_mid(s1) && switch_is_up(last_s1))
+    if (switch_is_up(s1))
+    {
+        s1_up_seen = true;
+    }
+
+    if (gimbal_roll_control_allowed && s1_up_seen &&
+        switch_is_mid(s1) && switch_is_up(last_s1))
     {
         const MITMeasure_t *yaw_measure = &MIT_MOTOR_MEASURE[GIMBAL_YAW_MIT_INDEX];
         const MITMeasure_t *roll_measure = &MIT_MOTOR_MEASURE[GIMBAL_ROLL_MIT_INDEX];
         const float angle_error = rad_format(yaw_measure->fdb.pos - GIMBAL_ROLL_YAW_SAFE_ANGLE_RAD);
-        if (gimbal_behaviour != GIMBAL_ZERO_FORCE &&
-            !gimbal_roll_motion_active &&
+        if (!gimbal_roll_motion_active &&
             !toe_is_error(YAW_GIMBAL_MOTOR_TOE) &&
             !toe_is_error(ROLL_GIMBAL_MOTOR_TOE) &&
             yaw_measure->fdb.last_fdb_time != 0U &&
             roll_measure->fdb.last_fdb_time != 0U &&
             now - yaw_measure->fdb.last_fdb_time <= GIMBAL_ROLL_FEEDBACK_TIMEOUT_MS &&
             now - roll_measure->fdb.last_fdb_time <= GIMBAL_ROLL_FEEDBACK_TIMEOUT_MS &&
-            fabsf(angle_error) <= GIMBAL_YAW_ORIGIN_TOLERANCE)
+            fabsf(angle_error) <= GIMBAL_YAW_ORIGIN_TOLERANCE &&
+            (!gimbal_roll_lifted ||
+             (!gimbal_friction_enabled && !gimbal_strum_enabled)))
         {
             gimbal_roll_target_lifted = !gimbal_roll_lifted;
             gimbal_roll_motion_active = true;
+            s1_up_seen = false;
         }
     }
-    if (switch_is_down(s1) && !switch_is_down(last_s1))
+    if (s1_down_count != 0U &&
+        (now - last_s1_down_tick) > GIMBAL_FRICTION_REPEAT_WINDOW_MS)
     {
-        if (s1_down_count < 2U)
+        s1_down_count = 0U;
+    }
+    if (switch_is_up(s1) || switch_is_down(s0))
+    {
+        s1_down_count = 0U;
+    }
+    if (switch_is_down(s1) && switch_is_mid(last_s1) && !switch_is_down(s0))
+    {
+        s1_down_tick = now;
+        if (s1_down_count == 1U)
         {
-            s1_down_count++;
-        }
-        if (s1_down_count >= 2U)
-        {
-            gimbal_friction_enabled = true;
+            gimbal_friction_enabled = !gimbal_friction_enabled;
             s1_down_count = 0U;
         }
+        else
+        {
+            s1_down_count = 1U;
+            last_s1_down_tick = now;
+        }
     }
-    gimbal_strum_enabled = gimbal_friction_enabled && switch_is_down(s1);
+    if (switch_is_down(s0))
+    {
+        gimbal_friction_enabled = false;
+    }
+    gimbal_strum_enabled = gimbal_friction_enabled && switch_is_down(s1) &&
+                           (now - s1_down_tick) >= SHOOT_STRUM_LONG_PRESS_MS;
 
     last_s0 = s0;
     last_s1 = s1;
@@ -156,11 +185,12 @@ bool gimbal_roll_control_is_allowed(void)
 
 bool gimbal_small_yaw_control_is_allowed(void)
 {
-    return gimbal_roll_lifted &&
-           !gimbal_roll_motion_active &&
-           (gimbal_behaviour == GIMBAL_RELATIVE_ANGLE ||
-            gimbal_behaviour == GIMBAL_SPIN ||
-            gimbal_behaviour == GIMBAL_AUTO_SENTINEL);
+    const bool roll_motion_hold = gimbal_roll_motion_active;
+
+    return gimbal_roll_control_allowed &&
+           (roll_motion_hold || !gimbal_roll_target_lifted ||
+            !gimbal_roll_lifted ||
+            (gimbal_total_mode != GIMBAL_TOTAL_MOTIONLESS));
 }
 
 void gimbal_roll_motion_complete(void)
@@ -267,7 +297,8 @@ void gimbal_behaviour_mode_set(gimbal_control_t *control)
         break;
 
     case GIMBAL_RELATIVE_ANGLE:
-        control->gimbal_yaw_motor.mode = GIMBAL_MOTOR_GYRO;
+        control->gimbal_yaw_motor.mode = gimbal_roll_lifted ?
+                                         GIMBAL_MOTOR_GYRO : GIMBAL_MOTOR_ENCODE;
         control->gimbal_pitch_motor.mode = GIMBAL_MOTOR_ENCODE;
         break;
 
@@ -281,10 +312,18 @@ void gimbal_behaviour_mode_set(gimbal_control_t *control)
         control->gimbal_pitch_motor.mode = GIMBAL_MOTOR_ENCODE;
         break;
 
+    case GIMBAL_DEBUG:
+        control->gimbal_yaw_motor.mode = GIMBAL_MOTOR_GYRO;
+        control->gimbal_pitch_motor.mode = GIMBAL_MOTOR_ENCODE;
+        break;
+
     case GIMBAL_MOTIONLESS:
     default:
-        control->gimbal_yaw_motor.mode = GIMBAL_MOTOR_RAW;
-        control->gimbal_pitch_motor.mode = GIMBAL_MOTOR_RAW;
+        control->gimbal_yaw_motor.mode = gimbal_roll_motion_active ?
+                                         GIMBAL_MOTOR_ENCODE : GIMBAL_MOTOR_RAW;
+        control->gimbal_pitch_motor.mode =
+            gimbal_roll_motion_active ?
+            GIMBAL_MOTOR_ENCODE : GIMBAL_MOTOR_RAW;
         break;
     }
 }
@@ -326,6 +365,9 @@ void gimbal_behaviour_control_set(float *add_yaw, float *add_pitch, gimbal_contr
     case GIMBAL_AUTO_SENTINEL:
         gimbal_spin_control(add_yaw, add_pitch, control);
         break;
+    case GIMBAL_DEBUG:
+        gimbal_motionless_control(add_yaw, add_pitch, control);
+        break;
     default:
         *add_yaw = 0.0f;
         *add_pitch = 0.0f;
@@ -365,6 +407,7 @@ void gimbal_behavour_set(gimbal_control_t *control)
 {
     static unsigned int init_time = 0U;
     static unsigned int init_stop_time = 0U;
+    static bool yaw_origin_allowed = false;
 
     if (control == 0)
     {
@@ -385,6 +428,7 @@ void gimbal_behavour_set(gimbal_control_t *control)
         gimbal_roll_control_allowed = false;
         gimbal_friction_enabled = false;
         gimbal_strum_enabled = false;
+        yaw_origin_allowed = false;
         init_time = 0U;
         init_stop_time = 0U;
         return;
@@ -392,18 +436,55 @@ void gimbal_behavour_set(gimbal_control_t *control)
 
     gimbal_remote_state_update(control);
 
+    if (!gimbal_roll_motion_active)
+    {
+        const MITMeasure_t *roll_measure = &MIT_MOTOR_MEASURE[GIMBAL_ROLL_MIT_INDEX];
+        const uint32_t now = HAL_GetTick();
+        const bool feedback_ready =
+            !toe_is_error(ROLL_GIMBAL_MOTOR_TOE) &&
+            roll_measure->fdb.last_fdb_time != 0U &&
+            (now - roll_measure->fdb.last_fdb_time) <= GIMBAL_ROLL_FEEDBACK_TIMEOUT_MS;
+
+        if (feedback_ready)
+        {
+            if (fabsf(roll_measure->fdb.pos - GIMBAL_ROLL_LIFT_ANGLE_RAD) <=
+                GIMBAL_ROLL_ARRIVE_ERROR_RAD)
+            {
+                gimbal_roll_lifted = true;
+                gimbal_roll_target_lifted = true;
+                gimbal_roll_state_initialized = true;
+            }
+            else if (fabsf(roll_measure->fdb.pos - GIMBAL_ROLL_LOWER_ANGLE_RAD) <=
+                     GIMBAL_ROLL_ARRIVE_ERROR_RAD)
+            {
+                gimbal_roll_lifted = false;
+                gimbal_roll_target_lifted = false;
+                gimbal_roll_state_initialized = true;
+            }
+        }
+    }
+
     {
         const MITMeasure_t *yaw_measure = &MIT_MOTOR_MEASURE[GIMBAL_YAW_MIT_INDEX];
         const uint32_t now = HAL_GetTick();
         const float yaw_error = rad_format(yaw_measure->fdb.pos - GIMBAL_ROLL_YAW_SAFE_ANGLE_RAD);
-        const bool yaw_safe =
+        const bool yaw_feedback_ready =
             !toe_is_error(YAW_GIMBAL_MOTOR_TOE) &&
             yaw_measure->fdb.last_fdb_time != 0U &&
-            (now - yaw_measure->fdb.last_fdb_time) <= GIMBAL_ROLL_FEEDBACK_TIMEOUT_MS &&
-            fabsf(yaw_error) <= GIMBAL_YAW_ORIGIN_TOLERANCE;
+            (now - yaw_measure->fdb.last_fdb_time) <= GIMBAL_ROLL_FEEDBACK_TIMEOUT_MS;
 
-        /* roll 倒下且大 yaw 未回到原点时保持零力；确认原点后恢复 S0 对应行为。 */
-        if (!gimbal_roll_lifted && !gimbal_roll_motion_active && !yaw_safe)
+        if (!yaw_feedback_ready ||
+            switch_is_down(control->gimbal_rc_ctrl->rc.s[GIMBAL_MODE_CHANNEL]))
+        {
+            yaw_origin_allowed = false;
+        }
+        else if (fabsf(yaw_error) <= GIMBAL_YAW_ORIGIN_TOLERANCE)
+        {
+            yaw_origin_allowed = true;
+        }
+
+        /* 安全角只决定首次使能；使能后由编码器闭环持续回位。 */
+        if (!gimbal_roll_lifted && !gimbal_roll_motion_active && !yaw_origin_allowed)
         {
             gimbal_total_mode = GIMBAL_TOTAL_MOTIONLESS;
             gimbal_behaviour = GIMBAL_ZERO_FORCE;
@@ -465,7 +546,7 @@ void gimbal_behavour_set(gimbal_control_t *control)
         gimbal_behaviour = GIMBAL_SPIN;
         break;
     case GIMBAL_TOTAL_AUTO_SENTINEL:
-        gimbal_behaviour = GIMBAL_AUTO_SENTINEL;
+        gimbal_behaviour = GIMBAL_DEBUG;
         break;
     case GIMBAL_TOTAL_MOTIONLESS:
     default:

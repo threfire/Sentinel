@@ -12,14 +12,6 @@
 #define SHOOT_FRIC_RPM_TO_MPS (2.0f * PI * SHOOT_FRIC_WHEEL_RADIUS_M / 60.0f)
 #define SHOOT_FRIC_MA_PER_A 1000.0f
 
-#ifndef SHOOT_STRUM_RELEASE_LOCK_VEL_RADPS
-#define SHOOT_STRUM_RELEASE_LOCK_VEL_RADPS 1.0f
-#endif
-
-#ifndef SHOOT_STRUM_TARGET_LPF_ALPHA
-#define SHOOT_STRUM_TARGET_LPF_ALPHA 0.01f
-#endif
-
 void shoot_init(void);
 void shoot_control_loop(void);
 

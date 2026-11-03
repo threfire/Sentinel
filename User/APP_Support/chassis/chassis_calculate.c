@@ -109,11 +109,16 @@ void chas_inv_cal(fp32 vx_set, fp32 vy_set, fp32 wz_set, fp32 *wheel_angle, fp32
 	if((wheel_angle == NULL) || (wheel_speed == NULL)) return;
 
 	const fp32 wz_speed = wz_set * CHASSIS_OMNI_ROTATE_RADIUS;
+	/* 原车体坐标绕 Z 轴旋转 90 度：原 +Y 对应期望 +X。 */
+	const fp32 coord_x = -vy_set;
+	const fp32 coord_y = vx_set;
+	const fp32 drive_x = (coord_x - coord_y) * 0.70710678f;
+	const fp32 drive_y = (coord_x + coord_y) * 0.70710678f;
 
-	wheel_speed[WHEEL_REAR_205]  = ( vy_set + wz_speed) * CHASSIS_WHEEL_205_DIRECTION;
-	wheel_speed[WHEEL_RIGHT_206] = (vx_set - wz_speed) * CHASSIS_WHEEL_206_DIRECTION;
-	wheel_speed[WHEEL_FRONT_207] = (vy_set - wz_speed) * CHASSIS_WHEEL_207_DIRECTION;
-	wheel_speed[WHEEL_LEFT_208]  = ( vx_set + wz_speed) * CHASSIS_WHEEL_208_DIRECTION;
+	wheel_speed[WHEEL_REAR_205]  = ( drive_y + wz_speed) * CHASSIS_WHEEL_205_DIRECTION;
+	wheel_speed[WHEEL_RIGHT_206] = ( drive_x - wz_speed) * CHASSIS_WHEEL_206_DIRECTION;
+	wheel_speed[WHEEL_FRONT_207] = ( drive_y - wz_speed) * CHASSIS_WHEEL_207_DIRECTION;
+	wheel_speed[WHEEL_LEFT_208]  = ( drive_x + wz_speed) * CHASSIS_WHEEL_208_DIRECTION;
 
 	for(uint8_t i = 0; i < CHASSIS_MODULE_NUM; i++)
 	{
@@ -143,8 +148,11 @@ void chas_for_cal(fp32 *wheel_angle, fp32 *wheel_speed, fp32 *vx, fp32 *vy, fp32
 	front_speed = wheel_speed[WHEEL_FRONT_207] * CHASSIS_WHEEL_207_DIRECTION;
 	left_speed  = wheel_speed[WHEEL_LEFT_208]  * CHASSIS_WHEEL_208_DIRECTION;
 
-	*vx = 0.5f * (right_speed + left_speed);
-	*vy = 0.5f * (rear_speed + front_speed);
+	const fp32 drive_x = 0.5f * (right_speed + left_speed);
+	const fp32 drive_y = 0.5f * (rear_speed + front_speed);
+
+	*vx = (drive_y - drive_x) * 0.70710678f;
+	*vy = -(drive_x + drive_y) * 0.70710678f;
 
 	if(fabsf(CHASSIS_OMNI_ROTATE_RADIUS) > 0.0001f)
 	{

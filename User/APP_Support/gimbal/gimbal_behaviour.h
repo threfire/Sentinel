@@ -20,6 +20,7 @@ typedef enum
     GIMBAL_MOTIONLESS,
     GIMBAL_SPIN,
     GIMBAL_AUTO_SENTINEL,
+    GIMBAL_DEBUG,             // 自动哨兵调试模式
 } gimbal_behaviour_e;
 
 typedef enum
@@ -52,8 +53,12 @@ extern volatile gimbal_behaviour_e gimbal_behaviour;
 #define GIMBAL_AUTO_SENTINEL_REPEAT_WINDOW_MS 500U
 #endif
 
+#ifndef GIMBAL_FRICTION_REPEAT_WINDOW_MS
+#define GIMBAL_FRICTION_REPEAT_WINDOW_MS 800U
+#endif
+
 #ifndef GIMBAL_YAW_ORIGIN_TOLERANCE
-#define GIMBAL_YAW_ORIGIN_TOLERANCE 0.08f
+#define GIMBAL_YAW_ORIGIN_TOLERANCE 0.16f
 #endif
 
 /**

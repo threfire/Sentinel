@@ -28,57 +28,17 @@
 #endif
 
 /* 拨弹轮控制参数 */
-#ifndef SHOOT_STRUM_LONG_PRESS_TORQUE_NM
-#define SHOOT_STRUM_LONG_PRESS_TORQUE_NM 0.5f
-#endif
 #ifndef SHOOT_STRUM_SPEED_RAD_S
 #define SHOOT_STRUM_SPEED_RAD_S (3.0f * PI)
 #endif
 #ifndef SHOOT_STRUM_SPEED_KP
-#define SHOOT_STRUM_SPEED_KP 1.0f
+#define SHOOT_STRUM_SPEED_KP 0.0f
 #endif
 #ifndef SHOOT_STRUM_SPEED_KD
-#define SHOOT_STRUM_SPEED_KD 0.2f
+#define SHOOT_STRUM_SPEED_KD 1.2f
 #endif
-
-#ifndef SHOOT_STRUM_SINGLE_TORQUE_FF_NM
-#define SHOOT_STRUM_SINGLE_TORQUE_FF_NM 6.0f
-#endif
-
-#ifndef SHOOT_STRUM_SINGLE_FF_TIME_MS
-#define SHOOT_STRUM_SINGLE_FF_TIME_MS 100U
-#endif
-
-#ifndef SHOOT_STRUM_SINGLE_FF_RELEASE_MS
-#define SHOOT_STRUM_SINGLE_FF_RELEASE_MS 80U
-#endif
-
-#ifndef SHOOT_STRUM_SINGLE_FF_FILTER_ALPHA
-#define SHOOT_STRUM_SINGLE_FF_FILTER_ALPHA 0.9f
-#endif
-
-#ifndef SHOOT_STRUM_TORQUE_PID_KP
-#define SHOOT_STRUM_TORQUE_PID_KP 7.60f
-#endif
-
-#ifndef SHOOT_STRUM_TORQUE_PID_KI
-#define SHOOT_STRUM_TORQUE_PID_KI 0.0f
-#endif
-
-#ifndef SHOOT_STRUM_TORQUE_PID_KD
-#define SHOOT_STRUM_TORQUE_PID_KD 0.20f
-#endif
-
-#ifndef SHOOT_STRUM_TORQUE_PID_MAX_OUT
-#define SHOOT_STRUM_TORQUE_PID_MAX_OUT 7.5f
-#endif
-
-#ifndef SHOOT_STRUM_TORQUE_PID_MAX_IOUT
-#define SHOOT_STRUM_TORQUE_PID_MAX_IOUT 7.5f
-#endif
-
-#ifndef SHOOT_STRUM_POS_DEADBAND
-#define SHOOT_STRUM_POS_DEADBAND 0.02f
+#ifndef SHOOT_STRUM_SPEED_TORQUE_FF_NM
+#define SHOOT_STRUM_SPEED_TORQUE_FF_NM 0.8f // 持续拨弹沿转动方向的前馈力矩，单位 N*m
 #endif
 
 /* 摩擦轮目标与保护配置 */
@@ -87,7 +47,7 @@
 #endif
 
 #ifndef SHOOT_FRIC_TARGET_SPEED_MPS
-#define SHOOT_FRIC_TARGET_SPEED_MPS 15.0f  // 摩擦轮线速度目标，单位 m/s
+#define SHOOT_FRIC_TARGET_SPEED_MPS 22.0f  // 摩擦轮线速度目标，单位 m/s
 #endif
 
 #ifndef SHOOT_FRIC_TARGET_SPEED_RPM
@@ -341,6 +301,11 @@ typedef struct
     uint16_t heat;
     uint16_t heat_cool_ticks;
     bool heat_limit_active;
+    bool friction_control_active;
+    bool friction_online;
+    bool friction_feedback_ready;
+    uint8_t friction_can_send_status;
+    int16_t friction_can_cmd[3];
 } shoot_task_control_t;
 
 extern shoot_task_control_t shoot_task_control;

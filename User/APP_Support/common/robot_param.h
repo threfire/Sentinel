@@ -40,33 +40,26 @@ extern "C" {
 #define FLASH_LOG_QUEUE_DEPTH   8U   // RAM 日志队列深度，控制循环只入队
 
 /* ========================= 云台角度 PID 参数 ========================= */
-/* pitch 轴陀螺仪绝对角控制 PID */
-#define PITCH_GYRO_ABSOLUTE_PID_KP         4.0f
-#define PITCH_GYRO_ABSOLUTE_PID_KI         0.0f
-#define PITCH_GYRO_ABSOLUTE_PID_KD         0.05f
-#define PITCH_GYRO_ABSOLUTE_PID_MAX_OUT    1.0f
-#define PITCH_GYRO_ABSOLUTE_PID_MAX_IOUT   0.0f
-
 /* yaw 轴陀螺仪绝对角控制 PID */
-#define YAW_GYRO_ABSOLUTE_PID_KP           5.0f
-#define YAW_GYRO_ABSOLUTE_PID_KI           0.01f
-#define YAW_GYRO_ABSOLUTE_PID_KD           0.74f
-#define YAW_GYRO_ABSOLUTE_PID_MAX_OUT      2.0f
+#define YAW_GYRO_ABSOLUTE_PID_KP           2.555f
+#define YAW_GYRO_ABSOLUTE_PID_KI           0.0f
+#define YAW_GYRO_ABSOLUTE_PID_KD           0.64f
+#define YAW_GYRO_ABSOLUTE_PID_MAX_OUT      10.0f
 #define YAW_GYRO_ABSOLUTE_PID_MAX_IOUT     0.0f
 
 /* pitch 轴编码器相对角控制 PID */
-#define PITCH_ENCODE_RELATIVE_PID_KP       8.8f
+#define PITCH_ENCODE_RELATIVE_PID_KP       2.8f
 #define PITCH_ENCODE_RELATIVE_PID_KI       0.0f
 #define PITCH_ENCODE_RELATIVE_PID_KD       0.70f
 #define PITCH_ENCODE_RELATIVE_PID_MAX_OUT  2.0f
 #define PITCH_ENCODE_RELATIVE_PID_MAX_IOUT 0.0f
 
 /* yaw 轴编码器相对角控制 PID */
-#define YAW_ENCODE_RELATIVE_PID_KP         1.8f
-#define YAW_ENCODE_RELATIVE_PID_KI         0.0f
-#define YAW_ENCODE_RELATIVE_PID_KD         0.2f
-#define YAW_ENCODE_RELATIVE_PID_MAX_OUT    0.8f
-#define YAW_ENCODE_RELATIVE_PID_MAX_IOUT   0.0f
+#define YAW_ENCODE_RELATIVE_PID_KP         YAW_GYRO_ABSOLUTE_PID_KP
+#define YAW_ENCODE_RELATIVE_PID_KI         YAW_GYRO_ABSOLUTE_PID_KI
+#define YAW_ENCODE_RELATIVE_PID_KD         YAW_GYRO_ABSOLUTE_PID_KD
+#define YAW_ENCODE_RELATIVE_PID_MAX_OUT    YAW_GYRO_ABSOLUTE_PID_MAX_OUT
+#define YAW_ENCODE_RELATIVE_PID_MAX_IOUT   YAW_GYRO_ABSOLUTE_PID_MAX_IOUT
 
 /* ========================= 云台前馈与输出配置 ========================= */
 #define YAW_REF_VEL_FILTER_ALPHA           0.05f   // yaw 目标角差分速度低通系数
@@ -75,7 +68,7 @@ extern "C" {
 #define PITCH_VELOCITY_FF_GAIN             0.1f    // pitch 速度前馈系数，单位 N*m/(rad/s)
 
 /* 惯量前馈：torque_ff = J * alpha_ref */
-#define YAW_INERTIA_KGM2                   0.013   // yaw 转动惯量 J，单位 kg*m^2
+#define YAW_INERTIA_KGM2                   0.18   // yaw 转动惯量 J，单位 kg*m^2
 #define PITCH_EQ_MASS_KG                   1.5f    // pitch 重力补偿使用的等效质量
 #define PITCH_INERTIA_KGM2                 0.00245 // pitch 转动惯量 J，单位 kg*m^2
 
@@ -91,6 +84,20 @@ extern "C" {
 #define GIMBAL_PITCH_STATIC_FRICTION_FULLBAND     0.008f
 #define GIMBAL_PITCH_STATIC_FRICTION_FILTER_ALPHA 0.1f
 
+/* 小 yaw GM6020 双环 PID 与电流限幅 */
+#define SMALL_YAW_6020_CURRENT_LIMIT_A    3.0f
+#define SMALL_YAW_ANGLE_PID_KP            5.60f
+#define SMALL_YAW_ANGLE_PID_KI            0.0f
+#define SMALL_YAW_ANGLE_PID_KD            0.08f
+#define SMALL_YAW_ANGLE_PID_MAX_OUT       2.0f
+#define SMALL_YAW_SPEED_PID_KP            1.0f
+#define SMALL_YAW_SPEED_PID_KI            0.02f
+#define SMALL_YAW_SPEED_PID_KD            0.0f
+#define SMALL_YAW_SPEED_PID_MAX_OUT       SMALL_YAW_6020_CURRENT_LIMIT_A
+#define SMALL_YAW_SPEED_PID_MAX_IOUT      0.2f
+#define SMALL_YAW_SPEED_FEEDBACK_ALPHA    0.05f
+#define SMALL_YAW_SPEED_ERROR_LIMIT_RAD_S 3.5f
+
 /* ========================= 遥控与鼠标输入配置 ========================= */
 #define GIMBAL_ANGLE_Z_RC_SEN              0.0000005f // 小陀螺底盘旋转角速度输入灵敏度
 #define YAW_CHANNEL                        2          // yaw 遥控通道
@@ -101,8 +108,8 @@ extern "C" {
 #define TURN_SPEED                         0.04f      // 小陀螺旋转速度
 #define TEST_KEYBOARD                      KEY_PRESSED_OFFSET_B // 测试按键
 #define RC_DEADBAND                        10         // 遥控器死区
-#define YAW_RC_SEN                         -0.000005f // yaw 遥控灵敏度
-#define PITCH_RC_SEN                       -0.000006f // pitch 遥控灵敏度
+#define YAW_RC_SEN                         -0.0000025f // yaw 遥控灵敏度
+#define PITCH_RC_SEN                       -0.000003f // pitch 遥控灵敏度
 #define YAW_MOUSE_SEN                      0.000006f  // yaw 鼠标灵敏度
 #define PITCH_MOUSE_SEN                    -0.000006f // pitch 鼠标灵敏度
 #define YAW_ENCODE_SEN                     0.01f      // yaw 编码器模式输入灵敏度
@@ -124,19 +131,11 @@ extern "C" {
 #define GIMBAL_MIT_FEEDBACK_INIT_DELAY     100U   // MIT 电机反馈初始化延时，单位 ms
 
 /* ========================= 拨弹控制参数 ========================= */
-//ps:拨弹盘减速比4，如有改动前馈力矩也得跟着改
-#define SHOOT_STRUM_SINGLE_STEP_RAD        (PI * 1.0f) // 单次拨弹角度，单位 rad
-#define SHOOT_STRUM_LONG_PRESS_MS          200U        // 长按判定时间，单位 ms
-#define SHOOT_STRUM_DIRECTION              1.0f        // 拨弹方向符号
+#define SHOOT_STRUM_LONG_PRESS_MS          500U        // 长按判定时间，单位 ms
+#define SHOOT_STRUM_DIRECTION             -1.0f        // 拨弹方向符号
 #define SHOOT_STRUM_FDB_TIMEOUT            100U        // 拨弹反馈超时，单位 ms
-#define SHOOT_STRUM_SINGLE_TORQUE_FF_NM    7.0f        // 单击拨弹前馈力矩，单位 N*m
-#define SHOOT_STRUM_SINGLE_FF_TIME_MS      200U         // 单击拨弹前馈持续时间，单位 ms
-#define SHOOT_STRUM_SINGLE_FF_RELEASE_MS   80U          // 单击拨弹前馈退出斜坡时间，单位 ms
-#define SHOOT_STRUM_SINGLE_FF_FILTER_ALPHA 1.0f       // 单击拨弹前馈低通滤波系数
 
 /* ========================= 云台机械限位与初始化配置 ========================= */
-#define YAW_MAX_RELATIVE_ANGLE             1.5707963f  // yaw 相对角上限
-#define YAW_MIN_RELATIVE_ANGLE            -1.5707963f  // yaw 相对角下限
 #define PITCH_HEAD_UP_MOTOR_ANGLE_RAD      1.0f        // pitch 抬头时的 MIT 位置反馈（rad）
 #define PITCH_HEAD_DOWN_MOTOR_ANGLE_RAD    1.85f       // pitch 低头时的 MIT 位置反馈（rad）
 #define HALF_ECD_RANGE                     4096        // 编码器半量程
@@ -196,13 +195,14 @@ extern "C" {
 /* MIT 电机 CAN ID：命令 ID 为 1~4，反馈 ID 为 0x51~0x54 */
 #define DM_STRUM_CAN_ID                     0X01
 #define DM_BIG_YAW_CAN_ID                   0X02
-#define GIMBAL_ROLL_YAW_SAFE_ANGLE_RAD      0.6f        // 大 yaw 朝前机械角；roll 抬放允许位置（rad）
+#define GIMBAL_ROLL_YAW_SAFE_ANGLE_RAD      2.31f        // 大 yaw 朝前机械角；roll 抬放允许位置（rad）
 #define GIMBAL_ROLL_LIFT_ANGLE_RAD          -0.0768f    // roll 抬起位置（rad）
 #define GIMBAL_ROLL_LOWER_ANGLE_RAD         -1.8222f    // roll 倒下位置（rad）
-#define GIMBAL_ROLL_MOVE_SPEED_RAD_S        0.5f        // roll 抬放目标角最大变化速度（rad/s）
-#define GIMBAL_ROLL_POSITION_KP             3.0f        // roll MIT 位置比例系数
+#define GIMBAL_ROLL_MOVE_SPEED_RAD_S        2.0f        // roll 抬放目标角最大变化速度（rad/s）
+#define GIMBAL_ROLL_POSITION_KP             4.0f        // roll MIT 位置比例系数
 #define GIMBAL_ROLL_POSITION_KD             0.5f        // roll MIT 速度阻尼系数
-#define GIMBAL_ROLL_ARRIVE_ERROR_RAD        0.03f       // roll 到位角度误差（rad）
+#define GIMBAL_ROLL_LIFT_FEEDFORWARD_TORQUE_NM 1.5f     // roll 抬起前馈力矩（N*m）
+#define GIMBAL_ROLL_ARRIVE_ERROR_RAD        0.17453293f // roll 到位角度误差（±10°，rad）
 #define GIMBAL_ROLL_ARRIVE_SPEED_RAD_S      0.1f        // roll 到位角速度阈值（rad/s）
 #define GIMBAL_ROLL_FEEDBACK_TIMEOUT_MS     100U        // roll 反馈超时时间（ms）
 #define DM_YAW_CAN_ID                       DM_BIG_YAW_CAN_ID
@@ -214,7 +214,9 @@ extern "C" {
 #define DM_ROLL_MASTER_ID                   0X54
 #define DM_PIT_MASTER_ID                    0X53
 #define CAN_SMALL_YAW_ID                    0X205 // ? yaw DJI 6020 ???? ID
+#define CAN_SMALL_YAW_CURRENT_CMD_ID        0X1FE // GM6020 电流控制帧 ID
 #define SMALL_YAW_FORWARD_ECD               670U  // 小 yaw 朝前时的 6020 编码器值
+#define SMALL_YAW_LOWER_ECD                 250U  // roll 倒下时的小 yaw 目标编码器值
 #define CAN_FRIC1_ID                        0X201 // 摩擦轮 1 电机 ID
 #define CAN_FRIC2_ID                        0X202 // 摩擦轮 2 电机 ID
 #define CAN_FRIC3_ID                        0X203 // 摩擦轮 3 电机 ID
@@ -228,7 +230,7 @@ extern "C" {
 #define CHASSIS_MODULE_NUM                4U                 // 底盘电机数量
 
 /* ========================= 底盘几何与电机映射 ========================= */
-/* 十字全向轮底盘：x 轴向右，y 轴向前，轮距 0.46 m */
+/* 十字全向轮底盘：x 轴向右，y 轴向前，轮距 0.56 m */
 #define CHASSIS_HALF_WHEELBASE            0.28f              // 底盘半轮距，用于旋转速度分量计算，单位 m
 #define CHASSIS_OMNI_ROTATE_RADIUS        CHASSIS_HALF_WHEELBASE // 底盘旋转半径，单位 m
 #define Wheel_Radius                      0.075f             // 底盘轮半径，单位 m
@@ -243,6 +245,10 @@ extern "C" {
 #define WHEEL_RIGHT_206                   1                  // 206 号右轮数组索引
 #define WHEEL_FRONT_207                   2                  // 207 号前轮数组索引
 #define WHEEL_LEFT_208                    3                  // 208 号左轮数组索引
+#define WHEEL_REAR_RIGHT_205              WHEEL_REAR_205
+#define WHEEL_FRONT_RIGHT_206             WHEEL_RIGHT_206
+#define WHEEL_FRONT_LEFT_207              WHEEL_FRONT_207
+#define WHEEL_REAR_LEFT_208               WHEEL_LEFT_208
 
 /* ========================= 底盘任务周期与输入映射 ========================= */
 #define CHASSIS_TASK_INIT_TIME            500                // 底盘任务启动延时，单位 ms
@@ -255,10 +261,10 @@ extern "C" {
 #define CHASSIS_WZ_CHANNEL                2                  // 底盘旋转遥控通道
 #define CHASSIS_MODE_CHANNEL              0                  // 底盘模式切换遥控通道
 
-#define CHASSIS_VX_RC_SEN                 0.005625f          // 底盘 x 方向遥控灵敏度，单位 (m/s)/遥控计数
-#define CHASSIS_VY_RC_SEN                 0.005625f          // 底盘 y 方向遥控灵敏度，单位 (m/s)/遥控计数
-#define CHASSIS_WZ_RC_SEN                 0.013f             // 底盘旋转摇杆灵敏度，单位 rad/s/遥控计数
-#define CHASSIS_YAW_HOLD_RC_SEN           0.0052f            // yaw 保持模式摇杆积分灵敏度，单位 rad/s/遥控计数
+#define CHASSIS_VX_RC_SEN                 0.004625f          // 底盘 x 方向遥控灵敏度，单位 (m/s)/遥控计数
+#define CHASSIS_VY_RC_SEN                 0.004625f          // 底盘 y 方向遥控灵敏度，单位 (m/s)/遥控计数
+#define CHASSIS_WZ_RC_SEN                 0.011f             // 底盘旋转摇杆灵敏度，单位 rad/s/遥控计数
+#define CHASSIS_YAW_HOLD_RC_SEN           0.0042f            // yaw 保持模式摇杆积分灵敏度，单位 rad/s/遥控计数
 #define CHASSIS_RC_DEADLINE               25                 // 底盘遥控死区
 
 #define CHASSIS_FRONT_KEY                 KEY_PRESSED_OFFSET_W // 底盘前进键
@@ -267,13 +273,14 @@ extern "C" {
 #define CHASSIS_RIGHT_KEY                 KEY_PRESSED_OFFSET_D // 底盘右移键
 
 /* ========================= 底盘速度上限与规划限幅 ========================= */
-#define NORMAL_MAX_CHASSIS_SPEED_X        5.2f               // 底盘 x 方向最大速度，单位 m/s
-#define NORMAL_MAX_CHASSIS_SPEED_Y        5.2f               // 底盘 y 方向最大速度，单位 m/s
-#define MAX_WHEEL_SPEED                   5.2f               // 单轮目标速度上限，单位 m/s
-#define CHASSIS_SPIN_SPEED                25.0f              // small yaw spin speed upper limit, rad/s
-#define CHASSIS_SPIN_MIN_SPEED            8.0f               // small yaw spin speed valley, rad/s
-#define CHASSIS_SPIN_PERIOD_MS            2000U              // small yaw speed waveform period, ms
-#define CHASSIS_SPIN_YAW_LIMIT_MARGIN_RAD  0.15f              // 小陀螺停止前预留的大 yaw 相对角余量，rad
+#define NORMAL_MAX_CHASSIS_SPEED_X        2.2f               // 底盘 x 方向最大速度，单位 m/s
+#define NORMAL_MAX_CHASSIS_SPEED_Y        2.2f               // 底盘 y 方向最大速度，单位 m/s
+#define MAX_WHEEL_SPEED                   3.2f               // 单轮目标速度上限，单位 m/s
+#define CHASSIS_SPIN_SPEED                3.28f              // 小陀螺最高旋转角速度，单位 rad/s
+#define CHASSIS_SPIN_MIN_SPEED            1.0f               // 小陀螺正弦变速波谷角速度，单位 rad/s
+#define CHASSIS_SPIN_PERIOD_MS            2000U              // 小陀螺正弦变速周期，单位 ms
+#define CHASSIS_SPIN_EXIT_WZ_FILTER_ALPHA 0.003f             // 小陀螺退出角速度低通斜坡系数
+#define CHASSIS_SPIN_EXIT_WZ_EPS          0.05f              // 小陀螺退出过渡结束角速度，单位 rad/s
 
 #define CHASSIS_ACCEL_X_NUM               0.1f               // x 方向遥控速度一阶滤波系数，无量纲
 #define CHASSIS_ACCEL_Y_NUM               0.1f               // y 方向遥控速度一阶滤波系数，无量纲
@@ -296,9 +303,9 @@ extern "C" {
 #define CHASSIS_RPM_TO_RAD_PER_SEC        0.104719755f       // 电机 rpm 转 rad/s 系数，单位 (rad/s)/rpm
 
 /* ========================= 底盘轮速 PID 与积分清理 ========================= */
-#define CHASSIS_SPEED_PI_KP               1600.0f            // 底盘轮速 PID 比例系数，单位 电流命令计数/(m/s)
+#define CHASSIS_SPEED_PI_KP               2400.0f            // 底盘轮速 PID 比例系数，单位 电流命令计数/(m/s)
 #define CHASSIS_SPEED_PI_KI               45.0f              // 底盘轮速 PID 积分系数，单位 电流命令计数/m
-#define CHASSIS_SPEED_PI_KD               100.0f             // 底盘轮速 PID 微分系数，单位 电流命令计数/(m/s^2)
+#define CHASSIS_SPEED_PI_KD               0.0f               // 底盘轮速 PID 微分系数，单位 电流命令计数/(m/s^2)
 #define CHASSIS_SPEED_PI_MAX_OUT          4800.0f            // 底盘轮速 PID 输出限幅，单位 电流命令计数
 #define CHASSIS_SPEED_PI_MAX_IOUT         650.0f             // 底盘轮速 PID 积分限幅，单位 电流命令计数
 #define CHASSIS_ZERO_SPEED_I_CLEAR_CYCLES 1U                 // 零输入且轮速归零后立即清理速度 PI 积分
@@ -312,25 +319,26 @@ extern "C" {
 #define M3505_MOTOR_SPEED_PID_MAX_OUT     16000.0f           // 底盘 3508 电流输出绝对限幅，单位 电流命令计数
 
 /* ========================= 底盘 yaw 控制 ========================= */
-#define CHASSIS_RETURN_TARGET             ( 0.72f)           // 底盘回正目标角，单位 rad
-#define CHASSIS_RETURN_OFFSET             ( 1.15f)           // 底盘回正坐标旋转偏置，单位 rad
-#define YAW_RETURN_PID_KP                 800.0f             // 底盘回正角度 PID 比例系数
-#define YAW_RETURN_PID_KI                 0.08f              // 底盘回正角度 PID 积分系数
-#define YAW_RETURN_PID_KD                 20.0f              // 底盘回正角度 PID 微分系数
-#define YAW_RETURN_PID_MAX_OUT            600.0f             // 底盘回正角度 PID 输出限幅，单位 PID输出计数
-#define YAW_RETURN_PID_MAX_IOUT           60.0f              // 底盘回正角度 PID 积分限幅，单位 PID输出计数
-#define CHASSIS_RETURN_WZ_SCALE           0.006f             // 底盘回正 PID 输出转角速度系数，单位 (rad/s)/PID输出计数
-#define CHASSIS_ANGLE_PD_KP               7.0f               // 底盘角度 PD 比例系数，单位 (rad/s)/rad
-#define CHASSIS_ANGLE_PD_KD               0.4f               // 底盘角度 PD 微分系数
-#define CHASSIS_ANGLE_PD_DEADBAND         0.012f             // 底盘角度 PD 误差死区，单位 rad
+#define CHASSIS_ANGLE_PD_KP               18.0f               // 底盘角度 PD 比例系数，单位 (rad/s)/rad
+#define CHASSIS_ANGLE_PD_KD               0.40f              // 底盘角度 PD 微分系数
+#define CHASSIS_ANGLE_PD_DEADBAND         0.02f              // 底盘角度 PD 误差死区，单位 rad
 #define CHASSIS_ANGLE_PD_MAX_OUT          8.0f               // 底盘角度 PD 输出限幅，单位 rad/s
+#define CHASSIS_WZ_SPEED_PI_KP            0.8f               // 底盘整车 wz 速度 PI 比例系数
+#define CHASSIS_WZ_SPEED_PI_KI            4.0f               // 底盘整车 wz 速度 PI 积分系数，单位 1/s
+#define CHASSIS_WZ_SPEED_PI_MAX_OUT       4.0f               // 底盘整车 wz 速度 PI 修正限幅，单位 rad/s
+#define CHASSIS_WZ_SPEED_PI_MAX_IOUT      2.0f               // 底盘整车 wz 速度 PI 积分限幅，单位 rad/s
+#define CHASSIS_YAW_RATE_FILTER_TAU       0.01f              // 底盘 yaw 角速度低通时间常数，单位 s
+#define CHASSIS_WHEEL_SPEED_FILTER_TAU    0.003f             // 底盘轮速低通时间常数，单位 s
+#define CHASSIS_WZ_OUTPUT_DEADBAND        0.05f              // 跟随模式 wz 输出死区，单位 rad/s
 #define CHASSIS_YAW_RATE_FEEDBACK_SIGN    1.0f              // 底盘 yaw 陀螺仪角速度反馈方向系数
+#define GIMBAL_YAW_FEEDBACK_SIGN          (-1.0f)           // 大 yaw 方向系数：顺时针负、逆时针正
+#define CHASSIS_GIMBAL_YAW_FEEDBACK_SIGN  (-1.0f)          // 底盘跟随使用的大 yaw 相对角方向系数
 
 /* ========================= 底盘整车前馈与速度制动补偿 ========================= */
-#define ROBOT_MASS                        8.0f               // 整车质量，单位 kg
-#define CHASSIS_BODY_FF_YAW_INERTIA_KGM2  0.39f              // 底盘 yaw 轴转动惯量前馈参数，单位 kg*m^2
-#define CHASSIS_BODY_FF_YAW_ACCEL_LIMIT   60.0f              // 底盘 yaw 规划角加速度限幅，单位 rad/s^2
-#define CHASSIS_BODY_FF_MAX_CURRENT_CMD   3200.0f            // 底盘整车动力学前馈单轮电流命令限幅
+#define ROBOT_MASS                        15.0f               // 整车质量，单位 kg
+#define CHASSIS_BODY_FF_YAW_INERTIA_KGM2  0.21f              // 底盘 yaw 轴转动惯量前馈参数，单位 kg*m^2
+#define CHASSIS_BODY_FF_YAW_ACCEL_LIMIT   10.0f              // 底盘 yaw 规划角加速度限幅，单位 rad/s^2
+#define CHASSIS_BODY_FF_MAX_CURRENT_CMD   2000.0f            // 底盘整车动力学前馈单轮电流命令限幅
 #define CHASSIS_BODY_VEL_BRAKE_ENABLE     1U                 // 1: 使能整车速度误差制动补偿
 #define CHASSIS_BODY_VEL_BRAKE_LOW_SPEED  0.1f               // 平移制动补偿低速增益结束速度，单位 m/s
 #define CHASSIS_BODY_VEL_BRAKE_HIGH_SPEED 0.15f               // 平移制动补偿高速增益开始速度，单位 m/s

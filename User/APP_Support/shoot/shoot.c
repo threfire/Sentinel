@@ -152,12 +152,7 @@ static void shoot_task_set_mode(shoot_task_control_t *control)
 
     control->friction_enable = gimbal_friction_is_enabled();
 
-    if (gimbal_cmd_to_shoot_stop())
-    {
-
-        control->mode = SHOOT_TASK_STOP;
-    }
-    else if (control->friction_enable)
+    if (control->friction_enable)
     {
 
         control->mode = SHOOT_TASK_READY_FRIC;
@@ -166,6 +161,8 @@ static void shoot_task_set_mode(shoot_task_control_t *control)
     {
         control->mode = SHOOT_TASK_STOP;
     }
+
+    control->friction_control_active = (control->mode == SHOOT_TASK_READY_FRIC);
 }
 
 static void shoot_task_update_feedback(shoot_task_control_t *control)
@@ -228,6 +225,8 @@ static bool shoot_task_strum_online(void)
 static void shoot_task_control_friction(shoot_task_control_t *control)
 {
     uint32_t now;
+    bool friction_online;
+    bool feedback_ready;
 
     if (control == NULL)
     {
@@ -235,12 +234,14 @@ static void shoot_task_control_friction(shoot_task_control_t *control)
     }
 
     now = HAL_GetTick();
-    if (!shoot_task_friction_online() ||
-        !shoot_task_motor_ready(&control->fric1, now) ||
-        !shoot_task_motor_ready(&control->fric2, now) ||
-        !shoot_task_motor_ready(&control->fric3, now))
+    friction_online = shoot_task_friction_online();
+    feedback_ready = shoot_task_motor_ready(&control->fric1, now) &&
+                     shoot_task_motor_ready(&control->fric2, now) &&
+                     shoot_task_motor_ready(&control->fric3, now);
+    control->friction_online = friction_online;
+    control->friction_feedback_ready = feedback_ready;
+    if (!friction_online || !feedback_ready)
     {
-
         shoot_task_stop_friction(control);
         return;
     }
@@ -380,6 +381,7 @@ static void shoot_task_stop_friction(shoot_task_control_t *control)
     control->fric3.ff_ticks = 0U;
     control->fric3.ff_cooldown_ticks = 0U;
     control->fric3.ff_current = 0;
+    control->friction_feedback_ready = false;
     control->bullet_speed_est_active = false;
     control->bullet_speed_est_ticks = 0U;
     control->fire_detect_active = false;
@@ -403,41 +405,18 @@ static void shoot_task_stop_friction(shoot_task_control_t *control)
 
 /**
   * @brief          拨弹控制
-  * @note           STOP 无力模式和拨弹离线时直接发送 0 力矩；READY 模式下才进入位置/力矩控制。
+  * @note           STOP 无力模式和拨弹离线时发送 0 力矩；摩擦轮就绪后允许速度控制。
   * @param[out]     control: 发射控制结构体指针
   * @retval         none
   */
 static void shoot_task_control_strum(shoot_task_control_t *control)
 {
-    static bool target_valid = false;
-    static bool last_press_l = false;
-    static bool long_press_active = false;
-    static bool release_follow_active = false;
-    static uint16_t hold_ticks = 0U;
-    static uint16_t single_ff_ticks = 0U;
-    static uint16_t single_ff_release_ticks = 0U;
-    static float single_ff_torque = 0.0f;
-    static float target_pos = 0.0f;
-    static float target_cmd_pos = 0.0f;
-    static float feedback_pos_last = 0.0f;
-    static float feedback_pos_continuous = 0.0f;
-    static float pid_iout = 0.0f;
     MITMeasure_t *strum_measure;
     uint32_t now;
-    uint16_t long_press_ticks;
-    uint16_t single_ff_release_total_ticks;
     bool feedback_ready;
     bool heat_blocked;
     bool press_l;
     bool strum_ready;
-    bool single_ff_active;
-    const float release_lock_vel = SHOOT_STRUM_RELEASE_LOCK_VEL_RADPS;
-    float feedback_pos;
-    float feedback_vel;
-    float position_error;
-    float torque_cmd;
-    float pid_out;
-    float single_ff_target;
 
     if (control == NULL || control->rc == NULL)
     {
@@ -446,10 +425,14 @@ static void shoot_task_control_strum(shoot_task_control_t *control)
 
     press_l = (control->rc->mouse.press_l != 0U) || gimbal_strum_is_enabled();
     heat_blocked = shoot_task_fire_heat_would_over_limit(control);
-    strum_ready = (control->mode == SHOOT_TASK_READY_FRIC) && !heat_blocked;
+    now = HAL_GetTick();
+    strum_ready = (control->mode == SHOOT_TASK_READY_FRIC) &&
+                  shoot_task_friction_online() &&
+                  shoot_task_motor_ready(&control->fric1, now) &&
+                  shoot_task_motor_ready(&control->fric2, now) &&
+                  shoot_task_motor_ready(&control->fric3, now);
     control->heat_limit_active = heat_blocked;
     strum_measure = &MIT_MOTOR_MEASURE[SHOOT_STRUM_MIT_INDEX];
-    now = HAL_GetTick();
     feedback_ready = shoot_task_strum_online() &&
                      (strum_measure->fdb.last_fdb_time != 0U) &&
                      ((now - strum_measure->fdb.last_fdb_time) <= SHOOT_STRUM_FDB_TIMEOUT);
@@ -460,37 +443,25 @@ static void shoot_task_control_strum(shoot_task_control_t *control)
         strum_measure->set.KP = 0.0f;
         strum_measure->set.KD = 0.0f;
         strum_measure->set.TOR = 0.0f;
-        target_valid = false;
-        last_press_l = false;
-        long_press_active = false;
-        release_follow_active = false;
-        hold_ticks = 0U;
-        single_ff_ticks = 0U;
-        single_ff_release_ticks = 0U;
-        single_ff_torque = 0.0f;
-        target_pos = 0.0f;
-        target_cmd_pos = 0.0f;
-        feedback_pos_last = 0.0f;
-        feedback_pos_continuous = 0.0f;
-        pid_iout = 0.0f;
         /* STOP 无力模式和拨弹离线保护只发送 0 力矩，不进入拨弹闭环。 */
         shoot_task_send_strum_torque(0.0f);
         return;
     }
 
-    /* 保持 18 Hz 弹频：12 发/圈对应 1.5 圈/s，即 3*pi rad/s。 */
+    /* 保持 18 Hz 弹频：12 发/圈对应 1.5 圈/s，即 3*pi rad/s。
+     * 位置目标固定为 0，避免反馈角跨过 ±pi 时引入位置跳变。 */
     if (press_l)
     {
-        strum_measure->set.POS = strum_measure->fdb.pos;
+        strum_measure->set.POS = 0.0f;
         strum_measure->set.VEL = SHOOT_STRUM_DIRECTION * SHOOT_STRUM_SPEED_RAD_S;
         strum_measure->set.KP = SHOOT_STRUM_SPEED_KP;
         strum_measure->set.KD = SHOOT_STRUM_SPEED_KD;
-        strum_measure->set.TOR = 0.0f;
+        strum_measure->set.TOR = SHOOT_STRUM_DIRECTION * SHOOT_STRUM_SPEED_TORQUE_FF_NM;
         shoot_task_send_strum_mit(strum_measure->set.POS,
                                   strum_measure->set.VEL,
                                   strum_measure->set.KP,
                                   strum_measure->set.KD,
-                                  0.0f);
+                                  strum_measure->set.TOR);
         return;
     }
 
@@ -500,185 +471,6 @@ static void shoot_task_control_strum(shoot_task_control_t *control)
     strum_measure->set.KD = 0.0f;
     strum_measure->set.TOR = 0.0f;
     shoot_task_send_strum_mit(strum_measure->set.POS, 0.0f, 0.0f, 0.0f, 0.0f);
-    return;
-
-    feedback_pos = strum_measure->fdb.pos;
-    feedback_vel = strum_measure->fdb.vel;
-    if (!target_valid)
-    {
-        target_pos = feedback_pos;
-        target_cmd_pos = feedback_pos;
-        feedback_pos_last = feedback_pos;
-        feedback_pos_continuous = feedback_pos;
-        pid_iout = 0.0f;
-        target_valid = true;
-    }
-    else
-    {
-        float feedback_delta;
-        const float feedback_range = P_MAX - P_MIN;
-        const float feedback_half_range = feedback_range * 0.5f;
-
-        feedback_delta = feedback_pos - feedback_pos_last;
-        if (feedback_delta > feedback_half_range)
-        {
-            feedback_delta -= feedback_range;
-        }
-        else if (feedback_delta < -feedback_half_range)
-        {
-            feedback_delta += feedback_range;
-        }
-
-        feedback_pos_continuous += feedback_delta;
-        feedback_pos_last = feedback_pos;
-    }
-
-    long_press_ticks = shoot_task_ms_to_ticks(SHOOT_STRUM_LONG_PRESS_MS);
-    single_ff_release_total_ticks = shoot_task_ms_to_ticks(SHOOT_STRUM_SINGLE_FF_RELEASE_MS);
-    torque_cmd = 0.0f;
-
-    if (press_l)
-    {
-        if (!last_press_l)
-        {
-            target_pos = feedback_pos_continuous + SHOOT_STRUM_DIRECTION * SHOOT_STRUM_SINGLE_STEP_RAD;
-            hold_ticks = 0U;
-            long_press_active = false;
-            release_follow_active = false;
-            single_ff_ticks = shoot_task_ms_to_ticks(SHOOT_STRUM_SINGLE_FF_TIME_MS);
-            single_ff_release_ticks = 0U;
-            pid_iout = 0.0f;
-        }
-        else
-        {
-            if (hold_ticks < long_press_ticks)
-            {
-                hold_ticks++;
-            }
-
-            if (hold_ticks >= long_press_ticks)
-            {
-                long_press_active = true;
-            }
-        }
-
-        if (long_press_active)
-        {
-            release_follow_active = false;
-            target_pos = feedback_pos_continuous;
-            target_cmd_pos = target_pos;
-            pid_iout = 0.0f;
-            single_ff_ticks = 0U;
-            single_ff_release_ticks = 0U;
-            single_ff_torque = 0.0f;
-            torque_cmd = SHOOT_STRUM_DIRECTION * SHOOT_STRUM_LONG_PRESS_TORQUE_NM;
-        }
-    }
-    else
-    {
-        if (last_press_l)
-        {
-            if (long_press_active)
-            {
-                release_follow_active = true;
-                target_pos = feedback_pos_continuous;
-                target_cmd_pos = target_pos;
-                feedback_pos_last = feedback_pos;
-                target_valid = true;
-                pid_iout = 0.0f;
-            }
-        }
-        hold_ticks = 0U;
-        long_press_active = false;
-
-        if (release_follow_active)
-        {
-            target_pos = feedback_pos_continuous;
-            target_cmd_pos = target_pos;
-            pid_iout = 0.0f;
-
-            if (fabsf(feedback_vel) <= release_lock_vel)
-            {
-                release_follow_active = false;
-            }
-        }
-    }
-
-    single_ff_active = strum_ready &&
-                       ((single_ff_ticks > 0U) ||
-                        (single_ff_release_ticks > 0U) ||
-                        (fabsf(single_ff_torque) >= 0.001f));
-
-    if (strum_ready && !long_press_active && !release_follow_active)
-    {
-        target_cmd_pos += SHOOT_STRUM_TARGET_LPF_ALPHA * (target_pos - target_cmd_pos);
-        position_error = target_cmd_pos - feedback_pos_continuous;
-        if (fabsf(position_error) <= SHOOT_STRUM_POS_DEADBAND)
-        {
-            position_error = 0.0f;
-            pid_iout = 0.0f;
-        }
-        else
-        {
-            if (single_ff_active)
-            {
-                pid_iout = 0.0f;
-            }
-            else
-            {
-                pid_iout += SHOOT_STRUM_TORQUE_PID_KI * position_error;
-                pid_iout = shoot_task_clamp_float(pid_iout,
-                                                  -SHOOT_STRUM_TORQUE_PID_MAX_IOUT,
-                                                  SHOOT_STRUM_TORQUE_PID_MAX_IOUT);
-            }
-        }
-
-        pid_out = SHOOT_STRUM_TORQUE_PID_KP * position_error + pid_iout;
-        if (!single_ff_active)
-        {
-            pid_out += -SHOOT_STRUM_TORQUE_PID_KD * feedback_vel;
-        }
-        pid_out = shoot_task_clamp_float(pid_out,
-                                         -SHOOT_STRUM_TORQUE_PID_MAX_OUT,
-                                         SHOOT_STRUM_TORQUE_PID_MAX_OUT);
-        torque_cmd = pid_out;
-    }
-
-    single_ff_target = 0.0f;
-    if (strum_ready && (single_ff_ticks > 0U))
-    {
-        single_ff_target = SHOOT_STRUM_DIRECTION * SHOOT_STRUM_SINGLE_TORQUE_FF_NM;
-        single_ff_ticks--;
-        if (single_ff_ticks == 0U)
-        {
-            single_ff_release_ticks = single_ff_release_total_ticks;
-        }
-    }
-    else if (strum_ready && (single_ff_release_ticks > 0U))
-    {
-        single_ff_target =
-            SHOOT_STRUM_DIRECTION * SHOOT_STRUM_SINGLE_TORQUE_FF_NM *
-            ((float)single_ff_release_ticks / (float)single_ff_release_total_ticks);
-        single_ff_release_ticks--;
-    }
-    single_ff_torque +=
-        SHOOT_STRUM_SINGLE_FF_FILTER_ALPHA * (single_ff_target - single_ff_torque);
-    if ((single_ff_ticks == 0U) &&
-        (single_ff_release_ticks == 0U) &&
-        (fabsf(single_ff_torque) < 0.001f))
-    {
-        single_ff_torque = 0.0f;
-    }
-    torque_cmd += single_ff_torque;
-
-    torque_cmd = shoot_task_clamp_float(torque_cmd, T_MIN, T_MAX);
-    strum_measure->set.POS = target_cmd_pos;
-    strum_measure->set.VEL = 0.0f;
-    strum_measure->set.KP = 0.0f;
-    strum_measure->set.KD = 0.0f;
-    strum_measure->set.TOR = torque_cmd;
-    last_press_l = press_l;
-    shoot_task_send_strum_torque(torque_cmd);
 }
 
 /**
@@ -704,7 +496,11 @@ static void shoot_task_send_friction_current(int16_t fric1_current, int16_t fric
     data[6] = 0U;
     data[7] = 0U;
 
-    canx_send_data(&hfdcan3, SHOOT_FRICTION_CMD_ID, data, 8U);
+    shoot_task_control.friction_can_cmd[0] = fric1_cmd;
+    shoot_task_control.friction_can_cmd[1] = fric2_cmd;
+    shoot_task_control.friction_can_cmd[2] = fric3_cmd;
+    shoot_task_control.friction_can_send_status =
+        canx_send_data(&hfdcan3, SHOOT_FRICTION_CMD_ID, data, 8U);
 }
 
 /**

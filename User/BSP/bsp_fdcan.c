@@ -641,38 +641,17 @@ motor_measure_t *get_chassis_motor_measure_point(uint8_t i)
  uint8_t canx_send_data(FDCAN_HandleTypeDef *hcan, uint16_t id, uint8_t *data, uint32_t len)
 {
 	g_can_fail_len = len;
-	FDCAN_TxHeaderTypeDef TxHeader;
+	FDCAN_TxHeaderTypeDef TxHeader = {0};
+
+	if (hcan == NULL || data == NULL || len > 8U)
+	{
+		return 1U;
+	}
 	
 	TxHeader.Identifier = id;                 // CAN ID
   TxHeader.IdType =  FDCAN_STANDARD_ID ;        
   TxHeader.TxFrameType = FDCAN_DATA_FRAME;  
-  if(len<=8)	
-	{
-			TxHeader.DataLength = fdcan_len_to_dlc(len);
-	}
-	else  if(len==12)	
-	{
-	   TxHeader.DataLength =FDCAN_DLC_BYTES_12;
-	}
-	else  if(len==16)	
-	{
-	  TxHeader.DataLength =FDCAN_DLC_BYTES_16;
-	
-	}
-  else  if(len==20)
-	{
-		TxHeader.DataLength =FDCAN_DLC_BYTES_20;
-	}		
-	else  if(len==24)	
-	{
-	 TxHeader.DataLength =FDCAN_DLC_BYTES_24;	
-	}else  if(len==48)
-	{
-	 TxHeader.DataLength =FDCAN_DLC_BYTES_48;
-	}else  if(len==64)
-   {
-		 TxHeader.DataLength =FDCAN_DLC_BYTES_64;
-	 }									
+	TxHeader.DataLength = fdcan_len_to_dlc(len);
 	TxHeader.ErrorStateIndicator =  FDCAN_ESI_ACTIVE;
   TxHeader.BitRateSwitch = FDCAN_BRS_OFF;//比特率切换关闭，不适用于经典CAN
   TxHeader.FDFormat =  FDCAN_CLASSIC_CAN;            // CANFD
@@ -682,11 +661,9 @@ motor_measure_t *get_chassis_motor_measure_point(uint8_t i)
    // 发送CAN指令
   if(HAL_FDCAN_AddMessageToTxFifoQ(hcan, &TxHeader, data) != HAL_OK)
   {
-       // 发送失败处理
-//       Error_Handler();      
+       return 1;
   }
-//	 HAL_FDCAN_AddMessageToTxFifoQ(hcan, &TxHeader, data);
-	 return 0;
+  return 0;
 
 }
  float uint_to_float(int x_int, float x_min, float x_max, int bits){

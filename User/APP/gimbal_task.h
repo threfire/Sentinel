@@ -35,6 +35,9 @@ typedef struct
     gimbal_motor_mode_e last_mode;   // 上一次电机控制模式，用于模式切换过渡
 
     float relative_angle;            // 相对角度反馈值
+    float relative_angle_unwrapped;  // 大 yaw 连续累计相对角度，单位 rad
+    float relative_angle_feedback_last; // 大 yaw 上一帧包角反馈，单位 rad
+    uint8_t relative_angle_unwrap_init; // 大 yaw 连续角累计初始化标志
     float relative_angle_set;        // 相对角度目标值
     float relative_angle_last;       // 上一次相对角度反馈值
     float relative_speed;            // 相对角编码器差分速度
@@ -77,7 +80,6 @@ typedef struct
 
     float max_relative_angle;        // 相对角度上限
     float min_relative_angle;        // 相对角度下限
-    uint16_t offset_ecd;             // 编码器零点偏移
 
     float rc_relative_angle_set;
     float rc_absolute_angle_set;
@@ -88,6 +90,24 @@ typedef struct
     gimbal_pid_t absolute_angle_pid;
     gimbal_pid_t relative_angle_pid;
 } gimbal_motor_t;
+
+typedef struct
+{
+    gimbal_pid_t angle_pid;           // 小 yaw 角度环 PID
+    gimbal_pid_t speed_pid;           // 小 yaw 速度环 PID
+    float current_cmd_a;               // 小 yaw 电流命令，单位 A
+    int16_t current_cmd_raw;           // 小 yaw 电流命令原始值
+    uint8_t control_allowed;           // 小 yaw 控制许可
+    uint8_t can_send_status;           // 小 yaw CAN 发送状态
+    float angle_rad;                   // 小 yaw 编码器角度，单位 rad
+    float target_rad;                  // 小 yaw 目标角度，单位 rad
+    float speed_feedback_rad_s;        // 小 yaw 角速度反馈，单位 rad/s
+    uint16_t last_ecd;                 // 小 yaw 上一帧编码器值
+    uint8_t feedback_init;              // 小 yaw 编码器反馈初始化标志
+    uint8_t scan_yaw_direction;         // 小 yaw 扫描方向
+    uint8_t scan_pitch_direction;       // pitch 扫描方向
+    float scan_pitch_target_rad;        // pitch 扫描目标角度，单位 rad
+} gimbal_small_yaw_t;
 
 typedef struct
 {
@@ -108,6 +128,7 @@ typedef struct
     bool roll_lifted;
     bool roll_target_lifted;
     bool roll_motion_active;
+    bool roll_state_initialized;
     bool roll_control_allowed;
     bool friction_enabled;
     bool strum_enabled;
@@ -118,11 +139,11 @@ typedef struct gimbal_control_t
     const RC_ctrl_t *gimbal_rc_ctrl;
     const float *gimbal_INT_angle_point;
     const float *gimbal_INT_gyro_point;
-    const float *gimbal_INT_accel_point;
     gimbal_motor_t gimbal_yaw_motor;
     gimbal_motor_t gimbal_pitch_motor;
     gimbal_step_cali_t gimbal_cali;
     gravity_comp_t gimbal_pitch_gravity_comp;
+    gimbal_small_yaw_t small_yaw;
     gimbal_behaviour_state_t behaviour_state;
 } gimbal_control_t;
 

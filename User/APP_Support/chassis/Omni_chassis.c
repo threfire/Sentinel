@@ -12,6 +12,7 @@
 #include "cmsis_os.h"
 #include "detect_task.h"
 #include "hwt_imu.h"
+#include "gimbal_behaviour.h"
 
 #include "pid.h"
 #include "robot_param.h"
@@ -30,14 +31,11 @@ static const fp32 chassis_yaw_pid_param[3] = {
 	0.0f,
 	CHASSIS_ANGLE_PD_KD
 };
-static const fp32 chassis_yaw_return_pid_param[3] = {
-	YAW_RETURN_PID_KP,
-	YAW_RETURN_PID_KI,
-	YAW_RETURN_PID_KD
-};
 static const fp32 chassis_x_order_filter = CHASSIS_ACCEL_X_NUM;
 static const fp32 chassis_y_order_filter = CHASSIS_ACCEL_Y_NUM;
-static fp32 chassis_return_target = CHASSIS_RETURN_TARGET;
+static const fp32 chassis_yaw_rate_filter_tau = CHASSIS_YAW_RATE_FILTER_TAU;
+static const fp32 chassis_yaw_set_vel_filter_tau = CHASSIS_YAW_RATE_FILTER_TAU;
+static const fp32 chassis_wheel_speed_filter_tau = CHASSIS_WHEEL_SPEED_FILTER_TAU;
 
 /**
   * @brief          更新底盘电机反馈、正解车速和姿态反馈
@@ -79,6 +77,9 @@ static fp32 chassis_angle_pd_calc(pid_type_def *pd, fp32 actual, fp32 target, ui
   * @retval         none
   */
 static fp32 chassis_follow_yaw_control(chassis_move_t *chassis_move_follow, fp32 manual_wz);
+static void chassis_wz_speed_pi_clear(chassis_move_t *chassis_move_clear);
+static fp32 chassis_wz_speed_pi_calc(chassis_move_t *chassis_move_pi, fp32 target_wz, fp32 actual_wz);
+static void chassis_yaw_set_vel_filter_clear(chassis_move_t *chassis_move_clear);
 /**
   * @brief          底盘航向保持模式速度给定
   * @retval         none
@@ -164,16 +165,21 @@ __attribute__((used)) void chassis_feedback_update(chassis_move_t *chassis_move_
 	if (chassis_move_update == NULL) return;
 	static fp32 last_speed[CHASSIS_MODULE_NUM] = {0.0f};
 	fp32 wheel_speed[CHASSIS_MODULE_NUM] = {0.0f};
+	fp32 yaw_relative_angle = 0.0f;
 	const hwt_imu_info_t *hwt906 = hwt906_get_info();
 
 	for (uint8_t i = 0; i < CHASSIS_MODULE_NUM; i++)
 	{
 		chassis_move_update->chassis_3508[i].speed = chassis_move_update->chassis_3508[i].chassis_motor_measure->speed_rpm / MPS_to_RPM;
+		first_order_filter_cali(&chassis_move_update->wheel_speed_filter[i],
+		                        chassis_move_update->chassis_3508[i].speed);
+		chassis_move_update->chassis_3508[i].speed_filtered =
+			chassis_move_update->wheel_speed_filter[i].out;
 		chassis_move_update->chassis_3508[i].speed_rad_s = (fp32)chassis_move_update->chassis_3508[i].chassis_motor_measure->speed_rpm * CHASSIS_RPM_TO_RAD_PER_SEC;
 		chassis_move_update->chassis_3508[i].given_current_a = (fp32)chassis_move_update->chassis_3508[i].chassis_motor_measure->given_current * CHASSIS_CURRENT_CMD_TO_A;
-		chassis_move_update->chassis_3508[i].accel = (chassis_move_update->chassis_3508[i].speed - last_speed[i]) * CHASSIS_CONTROL_FREQUENCE;
-		last_speed[i] = chassis_move_update->chassis_3508[i].speed;
-		wheel_speed[i] = chassis_move_update->chassis_3508[i].speed;
+		chassis_move_update->chassis_3508[i].accel = (chassis_move_update->chassis_3508[i].speed_filtered - last_speed[i]) * CHASSIS_CONTROL_FREQUENCE;
+		last_speed[i] = chassis_move_update->chassis_3508[i].speed_filtered;
+		wheel_speed[i] = chassis_move_update->chassis_3508[i].speed_filtered;
 	}
 
 	chas_for_cal(NULL,
@@ -189,25 +195,41 @@ __attribute__((used)) void chassis_feedback_update(chassis_move_t *chassis_move_
 		    (toe_is_error(YAW_GIMBAL_MOTOR_TOE) == 0U))
 		{
 			/* 云台绝对航向减大 yaw 关节角，得到底盘航向。 */
-			chassis_move_update->chassis_yaw = hwt906->angle.yaw_total_rad -
-				chassis_move_update->chassis_yaw_motor->relative_angle;
+			yaw_relative_angle = chassis_move_update->chassis_yaw_motor->relative_angle;
+			if ((chassis_move_update->chassis_mode == CHASSIS_VECTOR_SPIN) &&
+			    (chassis_move_update->chassis_yaw_motor->relative_angle_unwrap_init != 0u))
+			{
+				yaw_relative_angle = chassis_move_update->chassis_yaw_motor->relative_angle_unwrapped;
+			}
+			chassis_move_update->chassis_yaw = hwt906->angle.yaw_total_rad +
+				CHASSIS_GIMBAL_YAW_FEEDBACK_SIGN *
+				yaw_relative_angle;
+			/* 速度反馈必须沿用相对角的位置符号链。 */
 			chassis_move_update->chassis_yaw_rate =
-				CHASSIS_YAW_RATE_FEEDBACK_SIGN * hwt906->gyro.radps[HWT_AXIS_YAW] -
+				CHASSIS_YAW_RATE_FEEDBACK_SIGN * hwt906->gyro.radps[HWT_AXIS_YAW] +
+				CHASSIS_GIMBAL_YAW_FEEDBACK_SIGN *
+				GIMBAL_YAW_FEEDBACK_SIGN *
 				MIT_MOTOR_MEASURE[GIMBAL_YAW_MIT_INDEX].fdb.vel;
 		}
 		chassis_move_update->chassis_pitch = rad_format(hwt906->angle.rad[HWT_AXIS_PITCH]);
 		chassis_move_update->chassis_roll = rad_format(hwt906->angle.rad[HWT_AXIS_ROLL]);
 	}
+	first_order_filter_cali(&chassis_move_update->chassis_yaw_rate_filter,
+	                        chassis_move_update->chassis_yaw_rate);
+	chassis_move_update->chassis_yaw_rate_filtered =
+		chassis_move_update->chassis_yaw_rate_filter.out;
 
 	if ((chassis_move_update->chassis_yaw_motor != NULL) &&
 	    (chassis_move_update->chassis_yaw_motor->angle_offset_init != 0u) &&
 	    (toe_is_error(YAW_GIMBAL_MOTOR_TOE) == 0U))
 	{
 		chassis_move_update->chassis_relative_angle =
+			CHASSIS_GIMBAL_YAW_FEEDBACK_SIGN *
 			rad_format(chassis_move_update->chassis_yaw_motor->relative_angle);
 		chassis_move_update->chassis_relative_angle_vel =
+			CHASSIS_GIMBAL_YAW_FEEDBACK_SIGN *
+			GIMBAL_YAW_FEEDBACK_SIGN *
 			MIT_MOTOR_MEASURE[GIMBAL_YAW_MIT_INDEX].fdb.vel;
-		chassis_move_update->gimbal_radian_of_ecd = chassis_move_update->chassis_relative_angle;
 	}
 	else
 	{
@@ -226,14 +248,14 @@ __attribute__((used)) void chassis_init(chassis_move_t *chassis_move_init)
 	chassis_move_init->chassis_mode = CHASSIS_VECTOR_NO_MOVE;
 	chassis_move_init->spin_start_tick = 0U;
 	chassis_move_init->spin_wave_active = 0U;
+	chassis_move_init->spin_exit_transition_active = 0U;
 	chassis_move_init->chassis_RC = get_remote_control_point();
-	chassis_move_init->chassis_INS_angle = hwt906_get_gimbal_angle_point();
 	chassis_move_init->chassis_yaw_motor = get_yaw_motor_point();
-	chassis_move_init->chassis_pitch_motor = get_pitch_motor_point();
 
 	for(uint8_t i = 0; i < CHASSIS_MODULE_NUM; i++)
 	{
 		chassis_move_init->chassis_3508[i].chassis_motor_measure = get_chassis_motor_measure_point(i);
+		chassis_move_init->chassis_3508[i].speed_filtered = 0.0f;
 		chassis_move_init->model_3508_out[i] = 0.0f;
 		chassis_move_init->model_accel[i] = 0.0f;
 		chassis_move_init->model_last_speed_set[i] = 0.0f;
@@ -242,9 +264,10 @@ __attribute__((used)) void chassis_init(chassis_move_t *chassis_move_init)
 		chassis_move_init->stop_brake_active[i] = 0u;
 		chassis_move_init->motor_current_limit_a[i] = CHASSIS_CURRENT_BASE_LIMIT_A;
 		chassis_move_init->last_motor_current_limit_a[i] = CHASSIS_CURRENT_BASE_LIMIT_A;
+		first_order_filter_init(&chassis_move_init->wheel_speed_filter[i],
+		                        CHASSIS_CONTROL_TIME,
+		                        &chassis_wheel_speed_filter_tau);
 	}
-	PID_init(&chassis_move_init->chas_return_pid, PID_USUAL, chassis_yaw_return_pid_param, YAW_RETURN_PID_MAX_OUT, YAW_RETURN_PID_MAX_IOUT);
-
 	PID_init(&chassis_move_init->chassis_angle_pid, PID_USUAL, chassis_yaw_pid_param, CHASSIS_ANGLE_PD_MAX_OUT, 0.0f);
 
 	first_order_filter_init(&chassis_move_init->chassis_cmd_slow_set_vx, CHASSIS_CONTROL_TIME, &chassis_x_order_filter);
@@ -271,12 +294,19 @@ __attribute__((used)) void chassis_init(chassis_move_t *chassis_move_init)
 	chassis_move_init->chassis_yaw_target = 0.0f;
 	chassis_move_init->chassis_yaw_set = 0.0f;
 	chassis_move_init->chassis_yaw_set_vel = 0.0f;
+	chassis_move_init->chassis_yaw_set_vel_filtered = 0.0f;
 	chassis_body_feedforward_clear(chassis_move_init);
 	chassis_move_init->chassis_yaw_rate = 0.0f;
+	chassis_move_init->chassis_yaw_rate_filtered = 0.0f;
+	first_order_filter_init(&chassis_move_init->chassis_yaw_rate_filter,
+	                        CHASSIS_CONTROL_TIME,
+	                        &chassis_yaw_rate_filter_tau);
+	first_order_filter_init(&chassis_move_init->chassis_yaw_set_vel_filter,
+	                        CHASSIS_CONTROL_TIME,
+	                        &chassis_yaw_set_vel_filter_tau);
+	chassis_move_init->wz_speed_pi_iout = 0.0f;
 
 	chassis_wheel_angle_offset_init();
-
-	chassis_move_init->chassis_return_flag = 1;
 
 	chassis_feedback_update(chassis_move_init);
 }
@@ -297,10 +327,13 @@ __attribute__((used)) void chassis_set_mode(chassis_move_t *chassis_move_mode)
   */
 __attribute__((used)) void chassis_mode_change_control_transit(chassis_move_t *chassis_move_transit)
 {
+	uint8_t i;
+
 	if(chassis_move_transit == NULL) return;
 
 	if((chassis_move_transit->last_chassis_mode != CHASSIS_VECTOR_NO_MOVE) && chassis_move_transit->chassis_mode == CHASSIS_VECTOR_NO_MOVE)
 	{
+		chassis_move_transit->spin_exit_transition_active = 0U;
 		chassis_move_transit->chassis_relative_angle_target = 0.0f;
 		chassis_move_transit->chassis_relative_angle_set = 0.0f;
 		chassis_move_transit->chassis_relative_angle_set_vel = 0.0f;
@@ -311,31 +344,58 @@ __attribute__((used)) void chassis_mode_change_control_transit(chassis_move_t *c
 		chassis_move_transit->wz_plan = 0.0f;
 		chassis_move_transit->wz_plan_accel = 0.0f;
 		PID_clear(&chassis_move_transit->chassis_angle_pid);
+		chassis_wz_speed_pi_clear(chassis_move_transit);
+		chassis_yaw_set_vel_filter_clear(chassis_move_transit);
 		chassis_body_feedforward_clear(chassis_move_transit);
 		chassis_zero_force_clear(chassis_move_transit);
 	}
 	else if((chassis_move_transit->last_chassis_mode != CHASSIS_VECTOR_FOLLOW_GIMBAL_YAW) && chassis_move_transit->chassis_mode == CHASSIS_VECTOR_FOLLOW_GIMBAL_YAW)
 	{
+		if (chassis_move_transit->last_chassis_mode == CHASSIS_VECTOR_SPIN)
+		{
+			/* 退出小陀螺时从当前实测角速度开始，避免轮速目标瞬间反向。 */
+			chassis_move_transit->spin_exit_transition_active = 1U;
+			chassis_move_transit->wz_plan = chassis_move_transit->wz;
+			chassis_move_transit->wz_plan_accel = 0.0f;
+			for (i = 0U; i < CHASSIS_MODULE_NUM; i++)
+			{
+				chassis_move_transit->speed_pi_iout[i] = 0.0f;
+				chassis_move_transit->speed_pid_last_error[i] =
+					chassis_move_transit->chassis_3508[i].speed_filtered;
+				chassis_move_transit->model_accel[i] = 0.0f;
+				chassis_move_transit->stop_brake_active[i] = 0U;
+			}
+		}
+		else
+		{
+			chassis_move_transit->spin_exit_transition_active = 0U;
+		}
 		chassis_move_transit->chassis_relative_angle_target = 0.0f;
 		chassis_move_transit->chassis_relative_angle_set = 0.0f;
 		chassis_move_transit->chassis_relative_angle_set_vel = 0.0f;
 		PID_clear(&chassis_move_transit->chassis_angle_pid);
+		chassis_wz_speed_pi_clear(chassis_move_transit);
+		chassis_yaw_set_vel_filter_clear(chassis_move_transit);
 		chassis_body_feedforward_clear(chassis_move_transit);
 	}
 	else if((chassis_move_transit->last_chassis_mode != CHASSIS_VECTOR_YAW_HOLD) && chassis_move_transit->chassis_mode == CHASSIS_VECTOR_YAW_HOLD)
 	{
+		chassis_move_transit->spin_exit_transition_active = 0U;
 		chassis_move_transit->chassis_yaw_target = chassis_move_transit->chassis_yaw;
 		chassis_move_transit->chassis_yaw_set = chassis_move_transit->chassis_yaw;
 		chassis_move_transit->chassis_yaw_set_vel = 0.0f;
 		PID_clear(&chassis_move_transit->chassis_angle_pid);
+		chassis_yaw_set_vel_filter_clear(chassis_move_transit);
 		chassis_body_feedforward_clear(chassis_move_transit);
 	}
 	else if((chassis_move_transit->last_chassis_mode != CHASSIS_VECTOR_SPIN) && chassis_move_transit->chassis_mode == CHASSIS_VECTOR_SPIN)
 	{
+		chassis_move_transit->spin_exit_transition_active = 0U;
 		chassis_move_transit->chassis_relative_angle_target = chassis_move_transit->chassis_yaw;
 		chassis_move_transit->chassis_relative_angle_set = chassis_move_transit->chassis_yaw;
 		chassis_move_transit->chassis_relative_angle_set_vel = 0.0f;
 		PID_clear(&chassis_move_transit->chassis_angle_pid);
+		chassis_yaw_set_vel_filter_clear(chassis_move_transit);
 		chassis_body_feedforward_clear(chassis_move_transit);
 	}
 
@@ -357,25 +417,7 @@ __attribute__((used)) void chassis_set_contorl(chassis_move_t *chassis_move_cont
 	// 由行为层生成基础速度指令
 	chassis_behaviour_control_set(&vx_set, &vy_set, &wz_set, chassis_move_control);
 
-	if (chassis_move_control->chassis_mode == CHASSIS_VECTOR_RETURN)
-	{
-		chassis_move_control->wz_set = chassis_move_control->return_wz_set * CHASSIS_RETURN_WZ_SCALE;
-		if (fabs(chassis_move_control->wz_set) < 0.001f &&
-		    chassis_move_control->chassis_return_record == CHASSIS_VECTOR_RETURN)
-		{
-			chassis_move_control->wz_set = 0.0f;
-			chassis_move_control->chassis_return_flag = 0;
-		}
-
-		vector[0] = vx_set;
-		vector[1] = vy_set;
-		vector_rotate(chassis_move_control->gimbal_radian_of_ecd + CHASSIS_RETURN_OFFSET, vector);
-		vx_set = vector[0];
-		vy_set = vector[1];
-		chassis_move_control->vx_set = fp32_constrain(vx_set, chassis_move_control->vx_min_speed, chassis_move_control->vx_max_speed);
-		chassis_move_control->vy_set = fp32_constrain(vy_set, chassis_move_control->vy_min_speed, chassis_move_control->vy_max_speed);
-	}
-	else if (chassis_move_control->chassis_mode == CHASSIS_VECTOR_NO_MOVE)
+	if (chassis_move_control->chassis_mode == CHASSIS_VECTOR_NO_MOVE)
 	{
 		chassis_move_control->vx_set = vx_set = 0.0f;
 		chassis_move_control->vy_set = vy_set = 0.0f;
@@ -383,7 +425,15 @@ __attribute__((used)) void chassis_set_contorl(chassis_move_t *chassis_move_cont
 	}
 	else if (chassis_move_control->chassis_mode == CHASSIS_VECTOR_FOLLOW_GIMBAL_YAW)
 	{
-		chassis_move_control->wz_set = chassis_follow_yaw_control(chassis_move_control, wz_set);
+		if (chassis_move_control->spin_exit_transition_active != 0U)
+		{
+			/* 退出过渡期间固定减速到零，暂停跟随外环。 */
+			chassis_move_control->wz_set = 0.0f;
+		}
+		else
+		{
+			chassis_move_control->wz_set = chassis_follow_yaw_control(chassis_move_control, wz_set);
+		}
 
 		chassis_move_control->vx_set = fp32_constrain(vx_set, chassis_move_control->vx_min_speed, chassis_move_control->vx_max_speed);
 		chassis_move_control->vy_set = fp32_constrain(vy_set, chassis_move_control->vy_min_speed, chassis_move_control->vy_max_speed);
@@ -402,11 +452,7 @@ __attribute__((used)) void chassis_set_contorl(chassis_move_t *chassis_move_cont
 		    (chassis_move_control->chassis_yaw_motor == NULL) ||
 		    (chassis_move_control->chassis_yaw_motor->angle_offset_init == 0u) ||
 		    (toe_is_error(YAW_GIMBAL_MOTOR_TOE) != 0U) ||
-		    (MIT_MOTOR_MEASURE[GIMBAL_YAW_MIT_INDEX].fdb.last_fdb_time == 0U) ||
-		    (chassis_move_control->chassis_relative_angle <=
-		     chassis_move_control->chassis_yaw_motor->min_relative_angle + CHASSIS_SPIN_YAW_LIMIT_MARGIN_RAD) ||
-		    (chassis_move_control->chassis_relative_angle >=
-		     chassis_move_control->chassis_yaw_motor->max_relative_angle - CHASSIS_SPIN_YAW_LIMIT_MARGIN_RAD))
+		    (MIT_MOTOR_MEASURE[GIMBAL_YAW_MIT_INDEX].fdb.last_fdb_time == 0U))
 		{
 			chassis_move_control->vx_set = 0.0f;
 			chassis_move_control->vy_set = 0.0f;
@@ -414,10 +460,11 @@ __attribute__((used)) void chassis_set_contorl(chassis_move_t *chassis_move_cont
 			return;
 		}
 
-		/* 遥控平移以大云台朝前为参考，换算到底盘自身坐标。 */
+		/* 遥控平移以 HWT906 航向为参考，换算到底盘自身坐标。 */
 		vector[0] = vx_set;
 		vector[1] = vy_set;
-		vector_rotate(chassis_move_control->chassis_relative_angle, vector);
+		/* 使用 HWT906 解算的底盘航向，将航向坐标系速度换算到底盘坐标系。 */
+		vector_rotate(hwt906->angle.yaw_total_rad - chassis_move_control->chassis_yaw, vector);
 		chassis_move_control->vx_set = fp32_constrain(vector[0], chassis_move_control->vx_min_speed, chassis_move_control->vx_max_speed);
 		chassis_move_control->vy_set = fp32_constrain(vector[1], chassis_move_control->vy_min_speed, chassis_move_control->vy_max_speed);
 		chassis_move_control->wz_set = wz_set;
@@ -501,11 +548,11 @@ static void chassis_zero_force_clear(chassis_move_t *chassis_move_zero)
 	chassis_move_zero->vx_plan_accel = 0.0f;
 	chassis_move_zero->vy_plan_accel = 0.0f;
 	chassis_move_zero->wz_plan_accel = 0.0f;
-	chassis_move_zero->return_wz_set = 0.0f;
 	chassis_move_zero->chassis_cmd_slow_set_vx.out = 0.0f;
 	chassis_move_zero->chassis_cmd_slow_set_vy.out = 0.0f;
 	PID_clear(&chassis_move_zero->chassis_angle_pid);
-	PID_clear(&chassis_move_zero->chas_return_pid);
+	chassis_wz_speed_pi_clear(chassis_move_zero);
+	chassis_yaw_set_vel_filter_clear(chassis_move_zero);
 	chassis_body_feedforward_clear(chassis_move_zero);
 
 	for (i = 0; i < CHASSIS_MODULE_NUM; i++)
@@ -550,6 +597,8 @@ static void chassis_body_feedforward_update(chassis_move_t *chassis_move_ff)
 	fp32 alpha;
 	fp32 force_x;
 	fp32 force_y;
+	fp32 drive_x;
+	fp32 drive_y;
 	fp32 torque_z;
 	fp32 yaw_force;
 	fp32 wheel_force[CHASSIS_MODULE_NUM] = {0.0f};
@@ -585,13 +634,15 @@ static void chassis_body_feedforward_update(chassis_move_t *chassis_move_ff)
 
 	force_x = ROBOT_MASS * ax;
 	force_y = ROBOT_MASS * ay;
+	drive_x = -force_y;
+	drive_y = force_x;
 	torque_z = CHASSIS_BODY_FF_YAW_INERTIA_KGM2 * alpha;
 	yaw_force = (fabsf(CHASSIS_OMNI_ROTATE_RADIUS) > 0.0001f) ? (torque_z / CHASSIS_OMNI_ROTATE_RADIUS) : 0.0f;
 
-	wheel_force[WHEEL_REAR_205]  = ( 0.5f * force_y + 0.25f * yaw_force) * CHASSIS_WHEEL_205_DIRECTION;
-	wheel_force[WHEEL_RIGHT_206] = (0.5f * force_x - 0.25f * yaw_force) * CHASSIS_WHEEL_206_DIRECTION;
-	wheel_force[WHEEL_FRONT_207] = (0.5f * force_y - 0.25f * yaw_force) * CHASSIS_WHEEL_207_DIRECTION;
-	wheel_force[WHEEL_LEFT_208]  = ( 0.5f * force_x + 0.25f * yaw_force) * CHASSIS_WHEEL_208_DIRECTION;
+	wheel_force[WHEEL_REAR_205]  = (0.5f * (drive_x + drive_y) + 0.25f * yaw_force) * CHASSIS_WHEEL_205_DIRECTION;
+	wheel_force[WHEEL_RIGHT_206] = (0.5f * (drive_x - drive_y) - 0.25f * yaw_force) * CHASSIS_WHEEL_206_DIRECTION;
+	wheel_force[WHEEL_FRONT_207] = (0.5f * (drive_x + drive_y) - 0.25f * yaw_force) * CHASSIS_WHEEL_207_DIRECTION;
+	wheel_force[WHEEL_LEFT_208]  = (0.5f * (drive_x - drive_y) + 0.25f * yaw_force) * CHASSIS_WHEEL_208_DIRECTION;
 
 	for (uint8_t i = 0U; i < CHASSIS_MODULE_NUM; i++)
 	{
@@ -654,6 +705,8 @@ static void chassis_body_velocity_brake_update(chassis_move_t *chassis_move_brak
 	fp32 alpha = 0.0f;
 	fp32 force_x;
 	fp32 force_y;
+	fp32 drive_x;
+	fp32 drive_y;
 	fp32 torque_z;
 	fp32 yaw_force;
 	fp32 wheel_force[CHASSIS_MODULE_NUM] = {0.0f};
@@ -705,9 +758,10 @@ static void chassis_body_velocity_brake_update(chassis_move_t *chassis_move_brak
 		                       CHASSIS_BODY_VEL_BRAKE_ACCEL_LIMIT);
 	}
 
-	if (chassis_body_velocity_brake_axis_active(chassis_move_brake->wz_set,
-	                                            chassis_move_brake->wz,
-	                                            CHASSIS_BODY_VEL_BRAKE_WZ_EPS) != 0u)
+	if ((chassis_move_brake->spin_exit_transition_active == 0U) &&
+	    chassis_body_velocity_brake_axis_active(chassis_move_brake->wz_set,
+                                             chassis_move_brake->wz,
+                                             CHASSIS_BODY_VEL_BRAKE_WZ_EPS) != 0u)
 	{
 		chassis_move_brake->body_vel_brake_error_wz =
 			chassis_move_brake->wz_set - chassis_move_brake->wz;
@@ -718,13 +772,15 @@ static void chassis_body_velocity_brake_update(chassis_move_t *chassis_move_brak
 
 	force_x = ROBOT_MASS * ax;
 	force_y = ROBOT_MASS * ay;
+	drive_x = -force_y;
+	drive_y = force_x;
 	torque_z = CHASSIS_BODY_FF_YAW_INERTIA_KGM2 * alpha;
 	yaw_force = (fabsf(CHASSIS_OMNI_ROTATE_RADIUS) > 0.0001f) ? (torque_z / CHASSIS_OMNI_ROTATE_RADIUS) : 0.0f;
 
-	wheel_force[WHEEL_REAR_205]  = ( 0.5f * force_y + 0.25f * yaw_force) * CHASSIS_WHEEL_205_DIRECTION;
-	wheel_force[WHEEL_RIGHT_206] = (0.5f * force_x - 0.25f * yaw_force) * CHASSIS_WHEEL_206_DIRECTION;
-	wheel_force[WHEEL_FRONT_207] = (0.5f * force_y - 0.25f * yaw_force) * CHASSIS_WHEEL_207_DIRECTION;
-	wheel_force[WHEEL_LEFT_208]  = ( 0.5f * force_x + 0.25f * yaw_force) * CHASSIS_WHEEL_208_DIRECTION;
+	wheel_force[WHEEL_REAR_205]  = (0.5f * (drive_x + drive_y) + 0.25f * yaw_force) * CHASSIS_WHEEL_205_DIRECTION;
+	wheel_force[WHEEL_RIGHT_206] = (0.5f * (drive_x - drive_y) - 0.25f * yaw_force) * CHASSIS_WHEEL_206_DIRECTION;
+	wheel_force[WHEEL_FRONT_207] = (0.5f * (drive_x + drive_y) - 0.25f * yaw_force) * CHASSIS_WHEEL_207_DIRECTION;
+	wheel_force[WHEEL_LEFT_208]  = (0.5f * (drive_x - drive_y) + 0.25f * yaw_force) * CHASSIS_WHEEL_208_DIRECTION;
 
 	for (i = 0; i < CHASSIS_MODULE_NUM; i++)
 	{
@@ -781,11 +837,6 @@ static fp32 chassis_angle_pd_calc(pid_type_def *pd, fp32 actual, fp32 target, ui
   */
 static fp32 chassis_follow_yaw_control(chassis_move_t *chassis_move_follow, fp32 manual_wz)
 {
-	fp32 min_relative;
-	fp32 max_relative;
-	fp32 manual_wz_limited;
-	uint8_t wrap_enable = 1u;
-	fp32 target_vel;
 	fp32 pd_out;
 	fp32 wz_cmd;
 
@@ -796,43 +847,51 @@ static fp32 chassis_follow_yaw_control(chassis_move_t *chassis_move_follow, fp32
 	    (chassis_move_follow->chassis_yaw_motor->angle_offset_init == 0u))
 	{
 		PID_clear(&chassis_move_follow->chassis_angle_pid);
+		chassis_wz_speed_pi_clear(chassis_move_follow);
+		chassis_yaw_set_vel_filter_clear(chassis_move_follow);
 		return 0.0f;
 	}
 
-	manual_wz_limited = chassis_limit_wz_by_lateral_accel(chassis_move_follow->vx_plan,
-	                                                       chassis_move_follow->vy_plan,
-	                                                       manual_wz);
-	chassis_move_follow->chassis_relative_angle_target -= manual_wz_limited * CHASSIS_CONTROL_TIME;
-	target_vel = -manual_wz_limited;
-	min_relative = chassis_move_follow->chassis_yaw_motor->min_relative_angle;
-	max_relative = chassis_move_follow->chassis_yaw_motor->max_relative_angle;
-	if (min_relative < max_relative)
+	if (gimbal_roll_is_lifted() == false || gimbal_roll_motion_is_active())
 	{
-		wrap_enable = 0u;
-		chassis_move_follow->chassis_relative_angle_target =
-			fp32_constrain(chassis_move_follow->chassis_relative_angle_target, min_relative, max_relative);
-		if ((chassis_move_follow->chassis_relative_angle_target <= min_relative) ||
-		    (chassis_move_follow->chassis_relative_angle_target >= max_relative))
-		{
-			target_vel = 0.0f;
-		}
+		chassis_move_follow->chassis_yaw_target = chassis_move_follow->chassis_yaw;
+		chassis_move_follow->chassis_yaw_set = chassis_move_follow->chassis_yaw;
+		chassis_move_follow->chassis_yaw_set_vel = 0.0f;
+		PID_clear(&chassis_move_follow->chassis_angle_pid);
+		chassis_wz_speed_pi_clear(chassis_move_follow);
+		chassis_yaw_set_vel_filter_clear(chassis_move_follow);
+		return 0.0f;
 	}
-	else
-	{
-		chassis_move_follow->chassis_relative_angle_target =
-			rad_format(chassis_move_follow->chassis_relative_angle_target);
-	}
-	chassis_move_follow->chassis_relative_angle_set =
-		chassis_move_follow->chassis_relative_angle_target;
-	chassis_move_follow->chassis_relative_angle_set_vel = target_vel;
+
+	(void)manual_wz;
+	/* 跟随使用云台实测航向，避免把云台目标轨迹延迟引入底盘环。 */
+	chassis_move_follow->chassis_yaw_set =
+		chassis_move_follow->chassis_yaw_motor->absolute_angle;
+	chassis_move_follow->chassis_yaw_target =
+		chassis_move_follow->chassis_yaw_set;
+	chassis_move_follow->chassis_yaw_set_vel =
+		CHASSIS_YAW_RATE_FEEDBACK_SIGN *
+		chassis_move_follow->chassis_yaw_motor->gyro;
+	first_order_filter_cali(&chassis_move_follow->chassis_yaw_set_vel_filter,
+	                        chassis_move_follow->chassis_yaw_set_vel);
+	chassis_move_follow->chassis_yaw_set_vel_filtered =
+		chassis_move_follow->chassis_yaw_set_vel_filter.out;
 
 	pd_out = chassis_angle_pd_calc(&chassis_move_follow->chassis_angle_pid,
-	                               chassis_move_follow->chassis_relative_angle,
-	                               chassis_move_follow->chassis_relative_angle_set,
-	                               wrap_enable,
-	                               chassis_move_follow->chassis_relative_angle_set_vel,
-	                               chassis_move_follow->chassis_relative_angle_vel);
-	wz_cmd = chassis_limit_abs(pd_out, CHASSIS_WZ_MAX_SPEED);
+	                               chassis_move_follow->chassis_yaw,
+	                               chassis_move_follow->chassis_yaw_set,
+	                               1u,
+	                               chassis_move_follow->chassis_yaw_set_vel_filtered,
+	                               chassis_move_follow->chassis_yaw_rate_filtered);
+	wz_cmd = pd_out + chassis_wz_speed_pi_calc(chassis_move_follow,
+	                                           pd_out,
+	                                           chassis_move_follow->wz);
+	wz_cmd = chassis_limit_abs(wz_cmd, CHASSIS_WZ_MAX_SPEED);
+	if (fabsf(wz_cmd) < CHASSIS_WZ_OUTPUT_DEADBAND)
+	{
+		wz_cmd = 0.0f;
+		chassis_wz_speed_pi_clear(chassis_move_follow);
+	}
 	return wz_cmd;
 }
 
@@ -854,6 +913,7 @@ static fp32 chassis_yaw_hold_control(chassis_move_t *chassis_move_yaw_hold, fp32
 		chassis_move_yaw_hold->chassis_yaw_target = chassis_move_yaw_hold->chassis_yaw;
 		chassis_move_yaw_hold->chassis_yaw_set = chassis_move_yaw_hold->chassis_yaw;
 		chassis_move_yaw_hold->chassis_yaw_set_vel = 0.0f;
+		chassis_yaw_set_vel_filter_clear(chassis_move_yaw_hold);
 		return 0.0f;
 	}
 
@@ -867,14 +927,22 @@ static fp32 chassis_yaw_hold_control(chassis_move_t *chassis_move_yaw_hold, fp32
 	chassis_move_yaw_hold->chassis_yaw_set =
 		chassis_move_yaw_hold->chassis_yaw_target;
 	chassis_move_yaw_hold->chassis_yaw_set_vel = yaw_rate_set;
+	first_order_filter_cali(&chassis_move_yaw_hold->chassis_yaw_set_vel_filter,
+	                        chassis_move_yaw_hold->chassis_yaw_set_vel);
+	chassis_move_yaw_hold->chassis_yaw_set_vel_filtered =
+		chassis_move_yaw_hold->chassis_yaw_set_vel_filter.out;
 
 	pd_out = chassis_angle_pd_calc(&chassis_move_yaw_hold->chassis_angle_pid,
 	                               chassis_move_yaw_hold->chassis_yaw,
 	                               chassis_move_yaw_hold->chassis_yaw_set,
 	                               0u,
-	                               chassis_move_yaw_hold->chassis_yaw_set_vel,
-	                               chassis_move_yaw_hold->chassis_yaw_rate);
+	                               chassis_move_yaw_hold->chassis_yaw_set_vel_filtered,
+	                               chassis_move_yaw_hold->chassis_yaw_rate_filtered);
 	wz_cmd = chassis_limit_abs(pd_out, CHASSIS_WZ_MAX_SPEED);
+	if (fabsf(wz_cmd) < CHASSIS_WZ_OUTPUT_DEADBAND)
+	{
+		wz_cmd = 0.0f;
+	}
 	return wz_cmd;
 }
 
@@ -894,6 +962,57 @@ static fp32 chassis_limit_abs(fp32 value, fp32 max_abs)
 	}
 
 	return value;
+}
+
+/**
+  * @brief          清除整车 wz 速度 PI 积分
+  * @retval         none
+  */
+static void chassis_wz_speed_pi_clear(chassis_move_t *chassis_move_clear)
+{
+	if (chassis_move_clear == NULL) return;
+
+	chassis_move_clear->wz_speed_pi_iout = 0.0f;
+}
+
+static void chassis_yaw_set_vel_filter_clear(chassis_move_t *chassis_move_clear)
+{
+	if (chassis_move_clear == NULL) return;
+
+	first_order_filter_init(&chassis_move_clear->chassis_yaw_set_vel_filter,
+	                        CHASSIS_CONTROL_TIME,
+	                        &chassis_yaw_set_vel_filter_tau);
+	chassis_move_clear->chassis_yaw_set_vel_filtered = 0.0f;
+}
+
+/**
+  * @brief          计算整车 wz 速度 PI 修正量
+  * @retval         wz 速度修正量，单位 rad/s
+  */
+static fp32 chassis_wz_speed_pi_calc(chassis_move_t *chassis_move_pi, fp32 target_wz, fp32 actual_wz)
+{
+	fp32 error_wz;
+	fp32 iout_candidate;
+	fp32 out_raw;
+	fp32 out;
+
+	if (chassis_move_pi == NULL) return 0.0f;
+
+	error_wz = target_wz - actual_wz;
+	iout_candidate = chassis_move_pi->wz_speed_pi_iout +
+		CHASSIS_WZ_SPEED_PI_KI * error_wz * CHASSIS_CONTROL_TIME;
+	iout_candidate = chassis_limit_abs(iout_candidate, CHASSIS_WZ_SPEED_PI_MAX_IOUT);
+	out_raw = CHASSIS_WZ_SPEED_PI_KP * error_wz + iout_candidate;
+	out = chassis_limit_abs(out_raw, CHASSIS_WZ_SPEED_PI_MAX_OUT);
+
+	/* 修正量饱和且误差仍推动同向时冻结积分，误差反向时允许积分释放。 */
+	if (!((out_raw > CHASSIS_WZ_SPEED_PI_MAX_OUT && error_wz > 0.0f) ||
+	      (out_raw < -CHASSIS_WZ_SPEED_PI_MAX_OUT && error_wz < 0.0f)))
+	{
+		chassis_move_pi->wz_speed_pi_iout = iout_candidate;
+	}
+
+	return out;
 }
 
 /**
@@ -977,9 +1096,9 @@ static fp32 chassis_speed_pi_calc(chassis_move_t *chassis_move_pi, uint8_t motor
 	chassis_move_pi->speed_pi_iout[motor_idx] += CHASSIS_SPEED_PI_KI * error_v * CHASSIS_CONTROL_TIME;
 	chassis_move_pi->speed_pi_iout[motor_idx] = chassis_limit_abs(chassis_move_pi->speed_pi_iout[motor_idx],
 	                                                              CHASSIS_SPEED_PI_MAX_IOUT);
-	error_d = -(chassis_move_pi->chassis_3508[motor_idx].speed -
+	error_d = -(chassis_move_pi->chassis_3508[motor_idx].speed_filtered -
 	            chassis_move_pi->speed_pid_last_error[motor_idx]) / CHASSIS_CONTROL_TIME;
-	chassis_move_pi->speed_pid_last_error[motor_idx] = chassis_move_pi->chassis_3508[motor_idx].speed;
+	chassis_move_pi->speed_pid_last_error[motor_idx] = chassis_move_pi->chassis_3508[motor_idx].speed_filtered;
 	out = CHASSIS_SPEED_PI_KP * error_v +
 	      chassis_move_pi->speed_pi_iout[motor_idx] +
 	      CHASSIS_SPEED_PI_KD * error_d;
@@ -1101,32 +1220,11 @@ static fp32 Model_Based_Control(uint8_t motor_idx, fp32 set_speed, fp32 ref_spee
   */
 static void PID_Calc_Jump(chassis_move_t *chassis_pid_calc)
 {
-	fp32 target = 0.0f;
-	fp32 actual = 0.0f;
-	fp32 adjusted_target = 0.0f;
 	uint8_t i;
 	uint8_t set_speed_all_zero = 1u;
 	static uint16_t zero_speed_i_clear_count = 0u;
 
 	if (chassis_pid_calc == NULL) return;
-
-	if (chassis_pid_calc->chassis_mode == CHASSIS_VECTOR_RETURN)
-	{
-		target = rad_format(chassis_return_target);
-		actual = rad_format(chassis_pid_calc->gimbal_radian_of_ecd);
-
-		if (fabs(actual - target) > PI)
-		{
-			adjusted_target = (target < 0) ? target + 2 * PI : target - 2 * PI;
-			chassis_pid_calc->return_wz_set = PID_calc(&chassis_pid_calc->chas_return_pid, actual, adjusted_target);
-		}
-		else
-		{
-			chassis_pid_calc->return_wz_set = PID_calc(&chassis_pid_calc->chas_return_pid, actual, target);
-		}
-	}
-
-	chassis_pid_calc->chassis_return_record = chassis_pid_calc->chassis_mode;
 
 	for (i = 0; i < CHASSIS_MODULE_NUM; i++)
 	{
@@ -1140,7 +1238,7 @@ static void PID_Calc_Jump(chassis_move_t *chassis_pid_calc)
 		}
 		if ((chassis_zero_speed_set(chassis_pid_calc) != 0u) &&
 		    (fabsf(chassis_pid_calc->chassis_3508[i].speed_set) < 0.0001f) &&
-		    (fabsf(chassis_pid_calc->chassis_3508[i].speed) < CHASSIS_BRAKE_RELEASE_SPEED_EPS))
+		    (fabsf(chassis_pid_calc->chassis_3508[i].speed_filtered) < CHASSIS_BRAKE_RELEASE_SPEED_EPS))
 		{
 			chassis_pid_calc->model_accel[i] = 0.0f;
 			chassis_pid_calc->model_last_speed_set[i] = 0.0f;
@@ -1173,7 +1271,7 @@ static void PID_Calc_Jump(chassis_move_t *chassis_pid_calc)
 
 	for (i = 0; i < CHASSIS_MODULE_NUM; i++)
 	{
-		chassis_pid_calc->model_3508_out[i] = Model_Based_Control(i, chassis_pid_calc->chassis_3508[i].speed_set, chassis_pid_calc->chassis_3508[i].speed);
+		chassis_pid_calc->model_3508_out[i] = Model_Based_Control(i, chassis_pid_calc->chassis_3508[i].speed_set, chassis_pid_calc->chassis_3508[i].speed_filtered);
 	}
 }
 
@@ -1252,7 +1350,8 @@ __attribute__((used)) void chassis_control_loop(chassis_move_t *chassis_move_con
 	                  (fabsf(chassis_move_control_loop->vy_set) < 0.0001f) &&
 	                  (fabsf(chassis_move_control_loop->wz_set) < 0.0001f)) ? 1u : 0u;
 
-	if (zero_speed_cmd != 0u)
+	if ((zero_speed_cmd != 0u) &&
+	    (chassis_move_control_loop->spin_exit_transition_active == 0U))
 	{
 		chassis_move_control_loop->vx_plan = 0.0f;
 		chassis_move_control_loop->vy_plan = 0.0f;
@@ -1283,9 +1382,31 @@ __attribute__((used)) void chassis_control_loop(chassis_move_t *chassis_move_con
 		if ((chassis_move_control_loop->chassis_mode == CHASSIS_VECTOR_FOLLOW_GIMBAL_YAW) ||
 		    (chassis_move_control_loop->chassis_mode == CHASSIS_VECTOR_YAW_HOLD))
 		{
-			chassis_move_control_loop->wz_plan =
-				fp32_constrain(chassis_move_control_loop->wz_set, -CHASSIS_WZ_MAX_SPEED, CHASSIS_WZ_MAX_SPEED);
-			chassis_move_control_loop->wz_plan_accel = 0.0f;
+			if (chassis_move_control_loop->spin_exit_transition_active != 0U)
+			{
+				fp32 last_wz_plan = chassis_move_control_loop->wz_plan;
+
+				chassis_move_control_loop->wz_plan *=
+					(1.0f - CHASSIS_SPIN_EXIT_WZ_FILTER_ALPHA);
+				chassis_move_control_loop->wz_plan_accel =
+					(chassis_move_control_loop->wz_plan - last_wz_plan) / CHASSIS_CONTROL_TIME;
+				if (fabsf(chassis_move_control_loop->wz_plan) <= CHASSIS_SPIN_EXIT_WZ_EPS)
+				{
+					chassis_move_control_loop->wz_plan = 0.0f;
+					chassis_move_control_loop->wz_plan_accel = 0.0f;
+				}
+				if ((fabsf(chassis_move_control_loop->wz_plan) <= CHASSIS_SPIN_EXIT_WZ_EPS) &&
+				    (fabsf(chassis_move_control_loop->wz) <= CHASSIS_SPIN_EXIT_WZ_EPS))
+				{
+					chassis_move_control_loop->spin_exit_transition_active = 0U;
+				}
+			}
+			else
+			{
+				chassis_move_control_loop->wz_plan =
+					fp32_constrain(chassis_move_control_loop->wz_set, -CHASSIS_WZ_MAX_SPEED, CHASSIS_WZ_MAX_SPEED);
+				chassis_move_control_loop->wz_plan_accel = 0.0f;
+			}
 		}
 		else
 		{
@@ -1298,9 +1419,12 @@ __attribute__((used)) void chassis_control_loop(chassis_move_t *chassis_move_con
 			                                                            CHASSIS_WZ_MAX_ACCEL,
 			                                                            CHASSIS_WZ_MAX_JERK);
 		}
-		chassis_move_control_loop->wz_plan = chassis_limit_wz_by_lateral_accel(chassis_move_control_loop->vx_plan,
-		                                                                       chassis_move_control_loop->vy_plan,
-		                                                                       chassis_move_control_loop->wz_plan);
+		if (chassis_move_control_loop->spin_exit_transition_active == 0U)
+		{
+			chassis_move_control_loop->wz_plan = chassis_limit_wz_by_lateral_accel(chassis_move_control_loop->vx_plan,
+			                                                                       chassis_move_control_loop->vy_plan,
+			                                                                       chassis_move_control_loop->wz_plan);
+		}
 		chassis_body_feedforward_update(chassis_move_control_loop);
 	}
 	chassis_body_velocity_brake_update(chassis_move_control_loop);

@@ -33,7 +33,6 @@ typedef enum
     CHASSIS_VECTOR_FOLLOW_GIMBAL_YAW,
     CHASSIS_VECTOR_YAW_HOLD,
     CHASSIS_VECTOR_SPIN,
-    CHASSIS_VECTOR_RETURN,
 } chassis_mode_e;
 
 typedef struct
@@ -41,10 +40,10 @@ typedef struct
     const motor_measure_t *chassis_motor_measure;
     fp32 accel;
     fp32 speed;
+    fp32 speed_filtered;
     fp32 speed_rad_s;
     fp32 speed_set;
     fp32 angle;
-    fp32 angle_set;
     int16_t give_current;
     fp32 given_current_a;
 } chassis_motor_t;
@@ -60,13 +59,13 @@ typedef struct
 {
     const RC_ctrl_t *chassis_RC;
     const gimbal_motor_t *chassis_yaw_motor;
-    const gimbal_motor_t *chassis_pitch_motor;
-    const fp32 *chassis_INS_angle;
 
     chassis_mode_e chassis_mode;
     chassis_mode_e last_chassis_mode;
     uint32_t spin_start_tick; /**< 小陀螺正弦变速起始时间（ms）。 */
     uint8_t spin_wave_active; /**< 小陀螺正弦变速启动标志，1 为已启动。 */
+
+    uint8_t spin_exit_transition_active; /**< 小陀螺退出过渡状态，1 表示正在平滑减速。 */
 
     chassis_motor_t chassis_3508[CHASSIS_MODULE_NUM];
     wheel_angle_offset_t wheel_angle_offset;
@@ -81,11 +80,6 @@ typedef struct
     fp32 last_motor_current_limit_a[CHASSIS_MODULE_NUM];
 
     pid_type_def chassis_angle_pid;
-    pid_type_def chas_return_pid;
-
-    uint8_t chassis_return_flag;
-    chassis_mode_e chassis_return_record;
-
     first_order_filter_type_t chassis_cmd_slow_set_vx;
     first_order_filter_type_t chassis_cmd_slow_set_vy;
 
@@ -104,7 +98,6 @@ typedef struct
     fp32 vx_plan_accel;
     fp32 vy_plan_accel;
     fp32 wz_plan_accel;
-    fp32 return_wz_set;
     fp32 chassis_relative_angle;
     fp32 chassis_relative_angle_vel;
     fp32 chassis_relative_angle_target;
@@ -113,6 +106,7 @@ typedef struct
     fp32 chassis_yaw_target;
     fp32 chassis_yaw_set;
     fp32 chassis_yaw_set_vel;
+    fp32 chassis_yaw_set_vel_filtered;
     fp32 last_vx_plan_ff;
     fp32 last_vy_plan_ff;
     fp32 last_wz_plan_ff;
@@ -125,11 +119,8 @@ typedef struct
     fp32 body_vel_brake_error_wz;
     fp32 body_vel_brake_current[CHASSIS_MODULE_NUM];
     uint8_t body_ff_init;
-    fp32 gimbal_radian_of_ecd;
     fp32 chassis_yaw_rate;
-
-    uint8_t gimbal_behaviour;
-    uint8_t gimbal_shoot_mode;
+    fp32 wz_speed_pi_iout;
 
     fp32 vx_max_speed;
     fp32 vx_min_speed;
@@ -138,6 +129,10 @@ typedef struct
     fp32 chassis_yaw;
     fp32 chassis_pitch;
     fp32 chassis_roll;
+    fp32 chassis_yaw_rate_filtered;
+    first_order_filter_type_t chassis_yaw_rate_filter;
+    first_order_filter_type_t chassis_yaw_set_vel_filter;
+    first_order_filter_type_t wheel_speed_filter[CHASSIS_MODULE_NUM];
 } chassis_move_t;
 
 /**

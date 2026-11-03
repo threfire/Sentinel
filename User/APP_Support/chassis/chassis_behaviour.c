@@ -55,8 +55,10 @@ void chassis_behaviour_mode_set(chassis_move_t *chassis_move_mode)
 		chassis_behaviour_mode = CHASSIS_FOLLOW_GIMBAL_YAW;
 		break;
 	case GIMBAL_TOTAL_SPIN:
-	case GIMBAL_TOTAL_AUTO_SENTINEL:
 		chassis_behaviour_mode = CHASSIS_SPIN;
+		break;
+	case GIMBAL_TOTAL_AUTO_SENTINEL:
+		chassis_behaviour_mode = CHASSIS_NO_MOVE;
 		break;
 	case GIMBAL_TOTAL_MOTIONLESS:
 	default:
@@ -84,7 +86,6 @@ void chassis_behaviour_mode_set(chassis_move_t *chassis_move_mode)
 	}
 //	else if (chassis_behaviour_mode == CHASSIS_RETURN)
 //	{
-//		chassis_move_mode->chassis_mode = CHASSIS_VECTOR_RETURN;  // 底盘自转零点对齐到当前云台方向
 //	}
 
 	{

@@ -3,34 +3,74 @@
 #include "chassis_power_control.h"
 #include "chassis_task.h"
 #include "gimbal_task.h"
+#include "gimbal_behaviour.h"
+#include "yaw_pitch_direct.h"
 #include "shoot_task.h"
+#include "detect_task.h"
 #include "usart.h"
+#include "stm32h7xx_hal.h"
 #include <math.h>
 
 #ifndef VOFA_SERVICE_CHASSIS_MOTOR_INDEX
 #define VOFA_SERVICE_CHASSIS_MOTOR_INDEX 1U
 #endif
 
-static VOFA_JustFloatFrame_t s_vofa_frame =
+typedef struct
+{
+    float fdata[6];
+    uint8_t tail[4];
+} VOFA_JustFloatFrame6_t;
+
+static VOFA_JustFloatFrame6_t s_vofa_frame6 =
+{
+    .tail = {0x00, 0x00, 0x80, 0x7F}
+};
+
+static VOFA_JustFloatFrame_t s_vofa_frame12 =
 {
     .tail = {0x00, 0x00, 0x80, 0x7F}
 };
 
 static void VOFA_Send6(float ch0, float ch1, float ch2, float ch3, float ch4, float ch5)
 {
-    if (huart1.gState != HAL_UART_STATE_READY)
+    if (huart7.gState != HAL_UART_STATE_READY)
     {
         return;
     }
 
-    s_vofa_frame.fdata[0] = ch0;
-    s_vofa_frame.fdata[1] = ch1;
-    s_vofa_frame.fdata[2] = ch2;
-    s_vofa_frame.fdata[3] = ch3;
-    s_vofa_frame.fdata[4] = ch4;
-    s_vofa_frame.fdata[5] = ch5;
+    s_vofa_frame6.fdata[0] = ch0;
+    s_vofa_frame6.fdata[1] = ch1;
+    s_vofa_frame6.fdata[2] = ch2;
+    s_vofa_frame6.fdata[3] = ch3;
+    s_vofa_frame6.fdata[4] = ch4;
+    s_vofa_frame6.fdata[5] = ch5;
 
-    HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&s_vofa_frame, sizeof(s_vofa_frame));
+    HAL_UART_Transmit_DMA(&huart7, (uint8_t *)&s_vofa_frame6, sizeof(s_vofa_frame6));
+}
+
+static void VOFA_Send12(float ch0, float ch1, float ch2, float ch3,
+                        float ch4, float ch5, float ch6, float ch7,
+                        float ch8, float ch9, float ch10, float ch11)
+{
+    if (huart7.gState != HAL_UART_STATE_READY)
+    {
+        return;
+    }
+
+    s_vofa_frame12.fdata[0] = ch0;
+    s_vofa_frame12.fdata[1] = ch1;
+    s_vofa_frame12.fdata[2] = ch2;
+    s_vofa_frame12.fdata[3] = ch3;
+    s_vofa_frame12.fdata[4] = ch4;
+    s_vofa_frame12.fdata[5] = ch5;
+    s_vofa_frame12.fdata[6] = ch6;
+    s_vofa_frame12.fdata[7] = ch7;
+    s_vofa_frame12.fdata[8] = ch8;
+    s_vofa_frame12.fdata[9] = ch9;
+    s_vofa_frame12.fdata[10] = ch10;
+    s_vofa_frame12.fdata[11] = ch11;
+
+    HAL_UART_Transmit_DMA(&huart7, (uint8_t *)&s_vofa_frame12, sizeof(s_vofa_frame12));
 }
 
 void VOFA_SendChassisMotorMeasure(uint8_t motor_idx)
@@ -42,21 +82,19 @@ void VOFA_SendChassisMotorMeasure(uint8_t motor_idx)
         return;
     }
 
-    if (huart1.gState != HAL_UART_STATE_READY)
+    if (huart7.gState != HAL_UART_STATE_READY)
     {
         return;
     }
 
     motor = &CHASSIS_MOTOR_MEASURE[motor_idx];
 
-    s_vofa_frame.fdata[0] = (float)motor->ecd;
-    s_vofa_frame.fdata[1] = chassis_move.chassis_3508[motor_idx].speed_rad_s;
-    s_vofa_frame.fdata[2] = chassis_move.chassis_3508[motor_idx].given_current_a;
-    s_vofa_frame.fdata[3] = PowerLimit.P_bus;
-    s_vofa_frame.fdata[4] = (float)motor->last_ecd;
-    s_vofa_frame.fdata[5] = PowerLimit.P_origin;
-
-    HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&s_vofa_frame, sizeof(s_vofa_frame));
+    VOFA_Send6((float)motor->ecd,
+               chassis_move.chassis_3508[motor_idx].speed_rad_s,
+               chassis_move.chassis_3508[motor_idx].given_current_a,
+               PowerLimit.P_bus,
+               (float)motor->last_ecd,
+               PowerLimit.P_origin);
 }
 
 void VOFA_SendChassisPowerDebug(uint8_t motor_idx)
@@ -106,36 +144,23 @@ void VOFA_SendChassisRealSpeedCurrent(void)
 
 void VOFA_SendChassisAnglePidDebug(void)
 {
-    float target = chassis_move.chassis_angle_pid.set;
-    float actual = chassis_move.chassis_angle_pid.fdb;
-    float error;
-    float actual_vel = chassis_move.chassis_yaw_rate;
+    const float angle_error = rad_format(chassis_move.chassis_yaw_set -
+                                         chassis_move.chassis_yaw);
 
-    if (chassis_move.chassis_mode == CHASSIS_VECTOR_FOLLOW_GIMBAL_YAW)
-    {
-        target = chassis_move.chassis_relative_angle_set;
-        actual = chassis_move.chassis_relative_angle;
-        actual_vel = chassis_move.chassis_relative_angle_vel;
-    }
-    else if (chassis_move.chassis_mode == CHASSIS_VECTOR_YAW_HOLD)
-    {
-        target = chassis_move.chassis_yaw_set;
-        actual = chassis_move.chassis_yaw;
-        actual_vel = chassis_move.chassis_yaw_rate;
-    }
-
-    error = target - actual;
-    if (fabsf(error) > PI)
-    {
-        error += (error > 0.0f) ? (-2.0f * PI) : (2.0f * PI);
-    }
-
-    VOFA_Send6(target,
-               actual,
-               error,
-               chassis_move.chassis_angle_pid.Pout,
-               chassis_move.chassis_angle_pid.Dout,
-               actual_vel);
+    /* I0???I1?????I2????????I3????????
+     * I4??P?I5??D?I6??wz???I7??wz?I8-I11?205/206/207/208??????A?? */
+    VOFA_Send12((float)chassis_move.chassis_mode,
+                angle_error,
+                chassis_move.chassis_yaw_set_vel_filtered,
+                chassis_move.chassis_yaw_rate_filtered,
+                chassis_move.chassis_angle_pid.Pout,
+                chassis_move.chassis_angle_pid.Dout,
+                chassis_move.wz_set,
+                chassis_move.wz,
+                (float)chassis_move.chassis_3508[0].give_current * CHASSIS_CURRENT_CMD_TO_A,
+                (float)chassis_move.chassis_3508[1].give_current * CHASSIS_CURRENT_CMD_TO_A,
+                (float)chassis_move.chassis_3508[2].give_current * CHASSIS_CURRENT_CMD_TO_A,
+                (float)chassis_move.chassis_3508[3].give_current * CHASSIS_CURRENT_CMD_TO_A);
 }
 
 void VOFA_SendChassisTranslatePairDebug(void)
@@ -233,15 +258,45 @@ void VOFA_SendGimbalStrum(void)
 {
     const MITMeasure_t *strum = &MIT_MOTOR_MEASURE[SHOOT_STRUM_MIT_INDEX];
 
+    /* ch0 位置反馈(rad)，ch1 目标速度(rad/s)，ch2 速度反馈(rad/s)
+     * ch3 目标力矩(N*m)，ch4 力矩反馈(N*m)，ch5 电机温度(°C) */
     VOFA_Send6(strum->fdb.pos,
-               strum->set.POS,
+               strum->set.VEL,
                strum->fdb.vel,
-               strum->fdb.tor,
                strum->set.TOR,
+               strum->fdb.tor,
                strum->fdb.t_motor);
+}
+
+void VOFA_SendSmallYawDebug(void)
+{
+    const uint8_t small_yaw_feedback_ready =
+        (uint8_t)(DJI_MOTOR_MEASURE[3].last_fdb_time != 0U &&
+                  (HAL_GetTick() - DJI_MOTOR_MEASURE[3].last_fdb_time) <= 100U);
+    const uint8_t yaw_mode_non_raw =
+        (uint8_t)(gimbal_control.gimbal_yaw_motor.mode != GIMBAL_MOTOR_RAW);
+    const uint8_t small_yaw_roll_hold =
+        (uint8_t)(gimbal_roll_control_is_allowed() &&
+                  (gimbal_roll_motion_is_active() || !gimbal_roll_is_lifted()));
+
+    /* ch0 roll???ch1????ch2????ch3?????ch4????
+     * ch5?yaw?????ch6?yaw?????ch7 yaw?RAW?ch8 roll???????
+     * ch9 DBUS???ch10?yaw?????ch11?yaw????(A)? */
+    VOFA_Send12((float)gimbal_roll_control_is_allowed(),
+                (float)gimbal_roll_motion_is_active(),
+                (float)gimbal_roll_is_lifted(),
+                (float)gimbal_roll_target_is_lifted(),
+                (float)gimbal_total_mode_get(),
+                (float)gimbal_small_yaw_control_is_allowed(),
+                (float)gimbal_control.small_yaw.control_allowed,
+                (float)yaw_mode_non_raw,
+                (float)small_yaw_roll_hold,
+                (float)(toe_is_error(DBUS_TOE) == 0U),
+                (float)small_yaw_feedback_ready,
+                gimbal_control.small_yaw.current_cmd_a);
 }
 
 void VOFA_ServiceSend(void)
 {
-    VOFA_SendChassisRealSpeedCurrent();
+    VOFA_SendGimbalStrum();
 }
