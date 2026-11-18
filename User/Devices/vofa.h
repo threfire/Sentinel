@@ -33,6 +33,7 @@ void VOFA_SendGimbalPitch(void);
 void VOFA_SendGimbalYawPitchHalf(void);
 void VOFA_SendGimbalStrum(void);
 void VOFA_SendSmallYawDebug(void);
+void VOFA_SendGimbalAutoSentinelDebug(void);
 
 
 #ifdef __cplusplus

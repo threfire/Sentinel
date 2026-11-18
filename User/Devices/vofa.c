@@ -279,9 +279,9 @@ void VOFA_SendSmallYawDebug(void)
         (uint8_t)(gimbal_roll_control_is_allowed() &&
                   (gimbal_roll_motion_is_active() || !gimbal_roll_is_lifted()));
 
-    /* ch0 roll???ch1????ch2????ch3?????ch4????
-     * ch5?yaw?????ch6?yaw?????ch7 yaw?RAW?ch8 roll???????
-     * ch9 DBUS???ch10?yaw?????ch11?yaw????(A)? */
+    /* ch0-roll控制许可，ch1-roll运动，ch2-roll抬起，ch3-roll目标抬起，
+     * ch4-总模式，ch5-小yaw控制许可，ch6-结构体控制许可，ch7-yaw非RAW，
+     * ch8-roll保持，ch9-DBUS在线，ch10-小yaw反馈在线，ch11-小yaw电流(A)。 */
     VOFA_Send12((float)gimbal_roll_control_is_allowed(),
                 (float)gimbal_roll_motion_is_active(),
                 (float)gimbal_roll_is_lifted(),
@@ -296,7 +296,22 @@ void VOFA_SendSmallYawDebug(void)
                 gimbal_control.small_yaw.current_cmd_a);
 }
 
+void VOFA_SendGimbalAutoSentinelDebug(void)
+{
+    const gimbal_motor_t *pitch = &gimbal_control.gimbal_pitch_motor;
+
+    /* 自动哨兵正弦跟随：
+     * ch0 小 yaw 目标角(rad)，ch1 小 yaw 实际角(rad)，ch2 小 yaw 电流(A)
+     * ch3 pitch 目标角(rad)，ch4 pitch 实际角(rad)，ch5 pitch 控制输出(N*m) */
+    VOFA_Send6(gimbal_control.small_yaw.target_rad,
+               gimbal_control.small_yaw.angle_rad,
+               gimbal_control.small_yaw.current_cmd_a,
+               pitch->relative_angle_set,
+               pitch->relative_angle,
+               pitch->current_set);
+}
+
 void VOFA_ServiceSend(void)
 {
-    VOFA_SendGimbalStrum();
+    VOFA_SendGimbalAutoSentinelDebug();
 }

@@ -7,12 +7,63 @@
 #include "FreeRTOS.h"
 #include "cmsis_os.h"
 #include "task.h"
+#include <string.h>
 
 #if INCLUDE_uxTaskGetStackHighWaterMark
 uint32_t chassis_high_water;
 #endif
 
 chassis_move_t chassis_move;
+
+static uint16_t chassis_odometer_crc16(const uint8_t *data, uint8_t len)
+{
+
+    uint16_t crc = 0xFFFFU;
+    uint8_t i;
+    uint8_t bit;
+    for (i = 0U; i < len; i++)
+    {
+        crc ^= data[i];
+        for (bit = 0U; bit < 8U; bit++)
+        {
+            crc = (crc & 1U) != 0U ? (uint16_t)((crc >> 1) ^ 0xA001U) : (uint16_t)(crc >> 1);
+        }
+    }
+    return crc;
+}
+
+void chassis_odometer_can_rx(uint16_t can_id, const uint8_t *data, uint8_t len)
+{
+    if (data == NULL || len == 0U)
+    {
+        return;
+    }
+
+    chassis_move.odometer.can_id = can_id;
+    chassis_move.odometer.data_len = len;
+    if (len <= sizeof(chassis_move.odometer.raw))
+    {
+        memcpy(chassis_move.odometer.raw, data, len);
+    }
+
+    /* 里程计完整帧沿用例程格式：A5 5A + 6 个 float + CRC16，共 28 字节。 */
+    if (len < 28U || data[0] != 0xA5U || data[1] != 0x5AU ||
+        chassis_odometer_crc16(data, 26U) !=
+        ((uint16_t)data[26] | ((uint16_t)data[27] << 8)))
+    {
+        return;
+    }
+    memcpy(&chassis_move.odometer.x_mm, &data[2], sizeof(fp32));
+    memcpy(&chassis_move.odometer.y_mm, &data[6], sizeof(fp32));
+    memcpy(&chassis_move.odometer.yaw_deg, &data[10], sizeof(fp32));
+    memcpy(&chassis_move.odometer.gyro_dps, &data[14], sizeof(fp32));
+    memcpy(&chassis_move.odometer.vx_mps, &data[18], sizeof(fp32));
+    memcpy(&chassis_move.odometer.vy_mps, &data[22], sizeof(fp32));
+    chassis_move.odometer.vx_mps *= 0.001f;
+    chassis_move.odometer.vy_mps *= 0.001f;
+    chassis_move.odometer.last_update_tick = HAL_GetTick();
+    chassis_move.odometer.valid = 1U;
+}
 
 /**
   * @brief          底盘任务入口

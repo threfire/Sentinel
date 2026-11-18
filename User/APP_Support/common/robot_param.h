@@ -98,6 +98,15 @@ extern "C" {
 #define SMALL_YAW_SPEED_FEEDBACK_ALPHA    0.05f
 #define SMALL_YAW_SPEED_ERROR_LIMIT_RAD_S 3.5f
 
+/* 自动哨兵正弦扫描参数：开关、角度幅值、周期和线性扫描速度。 */
+#define GIMBAL_DEBUG_SMALL_YAW_SINE_ENABLE 1U
+#define GIMBAL_DEBUG_PITCH_SINE_ENABLE     1U
+#define SMALL_YAW_SCAN_LIMIT_RAD           (30.0f * PI / 180.0f) /* 小 yaw 幅值，单位 rad */
+#define PITCH_SCAN_LIMIT_RAD               (30.0f * PI / 180.0f) /* pitch 幅值，单位 rad */
+#define SMALL_YAW_DEBUG_SINE_PERIOD_MS     3000U               /* 正弦周期，单位 ms */
+#define SMALL_YAW_SCAN_SPEED_RAD_S         (20.0f * PI / 180.0f) /* 小 yaw 扫描速度，单位 rad/s */
+#define PITCH_SCAN_SPEED_RAD_S             (12.0f * PI / 180.0f) /* pitch 扫描速度，单位 rad/s */
+
 /* ========================= 遥控与鼠标输入配置 ========================= */
 #define GIMBAL_ANGLE_Z_RC_SEN              0.0000005f // 小陀螺底盘旋转角速度输入灵敏度
 #define YAW_CHANNEL                        2          // yaw 遥控通道
@@ -159,7 +168,7 @@ extern "C" {
 #define GIMBAL_MOTIONLESS_TIME_MAX         3000        // 静止行为最大保持时间
 
 #define INIT_YAW_SET                       0.0f        // yaw 初始化目标角
-#define INIT_PITCH_SET                     0.0f        // pitch 初始化目标角
+#define INIT_PITCH_SET                     1.425f      // pitch 初始化绝对目标角（rad）
 
 /* ========================= pitch 重力补偿配置 ========================= */
 #define PITCH_GRAVITY_COMP_MASS_KG         PITCH_EQ_MASS_KG // pitch 重力补偿质量
@@ -195,7 +204,7 @@ extern "C" {
 /* MIT 电机 CAN ID：命令 ID 为 1~4，反馈 ID 为 0x51~0x54 */
 #define DM_STRUM_CAN_ID                     0X01
 #define DM_BIG_YAW_CAN_ID                   0X02
-#define GIMBAL_ROLL_YAW_SAFE_ANGLE_RAD      2.31f        // 大 yaw 朝前机械角；roll 抬放允许位置（rad）
+#define GIMBAL_ROLL_YAW_SAFE_ANGLE_RAD      2.57f        // 大 yaw 朝前机械角；roll 抬放允许位置（rad）
 #define GIMBAL_ROLL_LIFT_ANGLE_RAD          -0.0768f    // roll 抬起位置（rad）
 #define GIMBAL_ROLL_LOWER_ANGLE_RAD         -1.8222f    // roll 倒下位置（rad）
 #define GIMBAL_ROLL_MOVE_SPEED_RAD_S        2.0f        // roll 抬放目标角最大变化速度（rad/s）

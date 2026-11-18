@@ -1228,15 +1228,14 @@ __attribute__((used)) void gimbal_feedback_update(gimbal_control_t *control)
         }
         else if (control->gimbal_pitch_motor.angle_offset_init == 0u)
         {
-            control->gimbal_pitch_motor.angle_offset =
-                pitch_motor_pos;
-
-            control->gimbal_pitch_motor.absolute_angle = 0.0f;
-            control->gimbal_pitch_motor.relative_angle = 0.0f;
-            control->gimbal_pitch_motor.relative_angle_set = 0.0f;
-            control->gimbal_pitch_motor.rc_relative_angle_set = 0.0f;
-            control->gimbal_pitch_motor.auto_relative_angle_set = 0.0f;
-            control->gimbal_pitch_motor.relative_angle_last = 0.0f;
+            /* pitch 使用 MIT 绝对位置，angle_offset 仅保留为初始化标志。 */
+            control->gimbal_pitch_motor.angle_offset = 0.0f;
+            control->gimbal_pitch_motor.absolute_angle = pitch_motor_pos;
+            control->gimbal_pitch_motor.relative_angle = pitch_motor_pos;
+            control->gimbal_pitch_motor.relative_angle_set = pitch_motor_pos;
+            control->gimbal_pitch_motor.rc_relative_angle_set = pitch_motor_pos;
+            control->gimbal_pitch_motor.auto_relative_angle_set = pitch_motor_pos;
+            control->gimbal_pitch_motor.relative_angle_last = pitch_motor_pos;
             control->gimbal_pitch_motor.relative_speed = 0.0f;
             control->gimbal_pitch_motor.relative_speed_update_init = 1u;
             control->gimbal_pitch_motor.absolute_angle_set =
@@ -1249,12 +1248,9 @@ __attribute__((used)) void gimbal_feedback_update(gimbal_control_t *control)
         }
         else
         {
-            /* pitch 相对角以本次上电位置为零点。 */
-            control->gimbal_pitch_motor.absolute_angle =
-                pitch_motor_pos -
-                control->gimbal_pitch_motor.angle_offset;
-            control->gimbal_pitch_motor.relative_angle =
-                control->gimbal_pitch_motor.absolute_angle;
+            /* pitch 反馈和控制目标统一使用 MIT 绝对位置。 */
+            control->gimbal_pitch_motor.absolute_angle = pitch_motor_pos;
+            control->gimbal_pitch_motor.relative_angle = pitch_motor_pos;
 
             if (control->gimbal_pitch_motor.relative_speed_update_init == 0u)
             {
@@ -1280,11 +1276,11 @@ __attribute__((used)) void gimbal_feedback_update(gimbal_control_t *control)
         }
         if (control->gimbal_pitch_motor.angle_offset_init != 0u)
         {
-            /* 电机反馈角 1.0 rad 抬头、1.85 rad 低头，限位换算到上电相对角。 */
+            /* pitch MIT 绝对位置限幅：1.0 rad 抬头，1.85 rad 低头。 */
             control->gimbal_pitch_motor.min_relative_angle =
-                PITCH_HEAD_UP_MOTOR_ANGLE_RAD - control->gimbal_pitch_motor.angle_offset;
+                PITCH_HEAD_UP_MOTOR_ANGLE_RAD;
             control->gimbal_pitch_motor.max_relative_angle =
-                PITCH_HEAD_DOWN_MOTOR_ANGLE_RAD - control->gimbal_pitch_motor.angle_offset;
+                PITCH_HEAD_DOWN_MOTOR_ANGLE_RAD;
         }
     }
 
@@ -1497,8 +1493,7 @@ __attribute__((used)) void gimbal_set_control(gimbal_control_t *control)
         if (gimbal_roll_motion_is_active() && !gimbal_roll_target_is_lifted())
         {
             /* roll 倒下期间保持 pitch 低头位置 1.85 rad。 */
-            const float down_relative_angle =
-                PITCH_HEAD_DOWN_MOTOR_ANGLE_RAD - pitch_motor->angle_offset;
+            const float down_relative_angle = PITCH_HEAD_DOWN_MOTOR_ANGLE_RAD;
             pitch_motor->rc_relative_angle_set = down_relative_angle;
             pitch_motor->auto_relative_angle_set = down_relative_angle;
         }

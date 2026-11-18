@@ -57,6 +57,21 @@ typedef struct
 
 typedef struct
 {
+    fp32 x_mm;
+    fp32 y_mm;
+    fp32 yaw_deg;
+    fp32 gyro_dps;
+    fp32 vx_mps;
+    fp32 vy_mps;
+    uint16_t can_id;
+    uint8_t data_len;
+    uint8_t valid;
+    uint32_t last_update_tick;
+    uint8_t raw[28];
+} chassis_odometer_t;
+
+typedef struct
+{
     const RC_ctrl_t *chassis_RC;
     const gimbal_motor_t *chassis_yaw_motor;
 
@@ -69,6 +84,7 @@ typedef struct
 
     chassis_motor_t chassis_3508[CHASSIS_MODULE_NUM];
     wheel_angle_offset_t wheel_angle_offset;
+    chassis_odometer_t odometer;
 
     fp32 model_3508_out[CHASSIS_MODULE_NUM];
     fp32 model_accel[CHASSIS_MODULE_NUM];
@@ -182,6 +198,8 @@ void chassis_control_loop(chassis_move_t *chassis_move_control_loop);
   * @retval         none
   */
 void chassis_send_cmd(chassis_move_t *chassis_move_send);
+
+void chassis_odometer_can_rx(uint16_t can_id, const uint8_t *data, uint8_t len);
 
 extern chassis_move_t chassis_move;
 extern fp32 yaw_set;

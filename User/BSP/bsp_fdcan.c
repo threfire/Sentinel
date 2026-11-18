@@ -23,6 +23,7 @@
 #include "detect_task.h"
 #include "pm01_api.h"
 #include "wattmeter_api.h"
+#include "chassis_task.h"
 
 __IO CAN_t can = {0};
 __IO CAN_ErrorStatus can_error_status = CAN_ERROR_NONE;
@@ -528,6 +529,7 @@ uint8_t fdcan3_receive(hcan_t *hfdcan, uint16_t *rec_id, uint8_t *buf)
 void fdcan1_rx_callback(void)
 {
 	len1 = fdcan1_receive(&hfdcan1, &rec_id1, rx_data1);  // 获取实际数据长度
+	chassis_odometer_can_rx(rec_id1, rx_data1, len1);
 
 }
 void fdcan2_rx_callback(void)
