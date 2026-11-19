@@ -1,6 +1,6 @@
 /**
  * @file    bsp_fdcan.c
- * @brief   CAN 通信及电机反馈解析。
+ * @brief   CAN 收发、按总线和 ID 分发电机反馈。
  *
  * 电机反馈结构体映射（ID 为反馈帧 ID）：
  * CAN1 大 yaw（MIT，0x52）：MIT_MOTOR_MEASURE[1].fdb。
@@ -39,20 +39,10 @@ uint8_t rx_data3[8] = {0};
 uint16_t rec_id3;
 
 uint8_t MOTOR_Data[8]={0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; // 电机数据
-
 uint8_t MOTOR_Enable[8]={0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC};   // 电机使能命令
 uint8_t MOTOR_Save_zero[8]={0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE}; // 电机保存零点命令
 uint8_t RS_MOTOR_PRE_MODE[8]={0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0xFD}; // 灵足电机私有模式
 uint8_t RS_MOTOR_MIT_MODE[8]={0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x02, 0xFD}; // 灵足电机mit模式
-// MIT 速度滤波缓冲（抑制近似正弦噪声）
-static float mit_vel_lpf[5] = {0.0f};
-motor_measure_t DJI_MOTOR_MEASURE[8];
-motor_measure_t CHASSIS_MOTOR_MEASURE[4];
-
-/*
-  MIT 电机反馈帧结构体
-*/
-MITMeasure_t MIT_MOTOR_MEASURE[5];   // 单个电机反馈结构体
 /**
 ************************************************************************
 * @brief:      	bsp_can_init(void)
@@ -63,6 +53,7 @@ MITMeasure_t MIT_MOTOR_MEASURE[5];   // 单个电机反馈结构体
 **/
 void bsp_can_init(void)
 {
+	motor_feedback_init();
 	can1_filter_init();
 	can2_filter_init();
 	can3_filter_init();
@@ -164,23 +155,14 @@ void can3_filter_init(void)
 	HAL_FDCAN_ConfigFifoWatermark(&hfdcan3, FDCAN_CFG_RX_FIFO0, 1);
 }
 
-// dji motor data read（宏改为内联函数）
-static inline void get_motor_measure(motor_measure_t *ptr, const uint8_t data[8])
-{
-    ptr->last_ecd = ptr->ecd;
-    ptr->ecd = (uint16_t)((data[0] << 8) | data[1]);
-    ptr->speed_rpm = (int16_t)((data[2] << 8) | data[3]);
-    ptr->given_current = (int16_t)((data[4] << 8) | data[5]);
-    ptr->temperate = data[6];
-}
 static inline int8_t get_mit_motor_index(uint32_t can_id)
 {
     switch(can_id)
     {
-        case DM_STRUM_MASTER_ID: return 0;
-        case DM_BIG_YAW_MASTER_ID: return 1;
-        case DM_ROLL_MASTER_ID: return 2;
-        case DM_PIT_MASTER_ID: return 3;
+        case DM_STRUM_MASTER_ID: return SHOOT_STRUM_MIT_INDEX;
+        case DM_BIG_YAW_MASTER_ID: return GIMBAL_YAW_MIT_INDEX;
+        case DM_ROLL_MASTER_ID: return GIMBAL_ROLL_MIT_INDEX;
+        case DM_PIT_MASTER_ID: return GIMBAL_PITCH_MIT_INDEX;
         default: return -1;
     }
 }
@@ -189,10 +171,10 @@ static inline int8_t get_dji_motor_index(uint32_t can_id)
 {
     switch(can_id)
     {
-        case CAN_SMALL_YAW_ID: return 3;
-        case CAN_FRIC1_ID: return 0;
-        case CAN_FRIC2_ID: return 1;
-        case CAN_FRIC3_ID: return 2;
+        case CAN_SMALL_YAW_ID: return GIMBAL_SMALL_YAW_DJI_INDEX;
+        case CAN_FRIC1_ID: return SHOOT_FRIC1_DJI_INDEX;
+        case CAN_FRIC2_ID: return SHOOT_FRIC2_DJI_INDEX;
+        case CAN_FRIC3_ID: return SHOOT_FRIC3_DJI_INDEX;
         default: return -1;
     }
 }
@@ -276,36 +258,6 @@ uint8_t fdcanx_send_data(hcan_t *hfdcan, uint16_t id, uint8_t *data, uint32_t le
 		return 1; // 失败
 	return 0; // 成功	
 }
-/**
- * @brief  MITFdbData: 获取 MIT 电机反馈数据（内联），含速度低通滤波
- * @note   vel 噪声近似正弦，使用一阶低通平滑
- */
-static inline void MITFdbData(MITMeasure_t *MIT_measure, const uint8_t rx_data[8], uint8_t index)
-{
-    if(index >= 5)
-    {
-        index = 0;
-    }
-
-    MIT_measure->fdb.id = (rx_data[0]) & 0x0F;
-    MIT_measure->fdb.state = (rx_data[0]) >> 4;
-    MIT_measure->fdb.p_int = ((rx_data[1] << 8) | rx_data[2]);
-    MIT_measure->fdb.v_int = ((rx_data[3] << 4) | (rx_data[4] >> 4));
-    MIT_measure->fdb.t_int = (((rx_data[4] & 0xF) << 8) | rx_data[5]);
-    MIT_measure->fdb.pos = uint_to_float(MIT_measure->fdb.p_int, P_MIN, P_MAX, 16);
-
-    const float vel_raw = uint_to_float(MIT_measure->fdb.v_int, V_MIN, V_MAX, 12);
-    const float alpha = 1.0f;
-    // 一阶低通滤波，直接操作全局静态变量mit_vel_lpf
-    mit_vel_lpf[index] = mit_vel_lpf[index] + alpha * (vel_raw - mit_vel_lpf[index]);
-    MIT_measure->fdb.vel = mit_vel_lpf[index];
-
-    MIT_measure->fdb.tor = uint_to_float(MIT_measure->fdb.t_int, T_MIN, T_MAX, 12);
-    MIT_measure->fdb.t_mos = (float)(rx_data[6]);
-    MIT_measure->fdb.t_motor = (float)(rx_data[7]);
-}
-
-
 void Motor_ENABLE(FDCAN_HandleTypeDef *hcan, uint16_t id)
 {
 	canx_send_data(hcan, id, MOTOR_Enable, 8);
@@ -331,8 +283,6 @@ void Motor_MIT_MODE(FDCAN_HandleTypeDef *hcan, uint16_t id)
 * @details:    	接收数据
 ************************************************************************
 **/
-uint8_t can1_cnt = 0;
-uint8_t can2_cnt = 0;
 uint32_t rx1free_level;
 uint8_t fdcan1_receive(hcan_t *hfdcan, uint16_t *rec_id, uint8_t *buf)
 {	
@@ -355,39 +305,29 @@ uint8_t fdcan1_receive(hcan_t *hfdcan, uint16_t *rec_id, uint8_t *buf)
 			case DM_BIG_YAW_MASTER_ID:
 			{
 				int8_t motor_index = get_mit_motor_index(pRxHeader.Identifier);
-				if(motor_index < 0 || motor_index >= 5)
+				if(motor_index < 0 || len != 8U)
 				{
 					return len;
 				}
 
-				can1_cnt = (uint8_t)motor_index;
-				MITFdbData(&MIT_MOTOR_MEASURE[can1_cnt], buf, can1_cnt);
-				MIT_MOTOR_MEASURE[can1_cnt].fdb.last_fdb_time = fdb_time;
-				if (pRxHeader.Identifier == DM_BIG_YAW_MASTER_ID)
-				{
-					detect_hook(YAW_GIMBAL_MOTOR_TOE);
-				}
-				else if (pRxHeader.Identifier == DM_ROLL_MASTER_ID)
-				{
-					detect_hook(ROLL_GIMBAL_MOTOR_TOE);
-				}
-				else
-				{
-					detect_hook(PLUCK_MOTOR_TOE);
-				}
+				motor_feedback_update_mit((uint8_t)motor_index, buf, fdb_time);
+				detect_hook(YAW_GIMBAL_MOTOR_TOE);
 				break;
 			}
-			case 0x205:
-			case 0x206:
-			case 0x207:
-			case 0x208:
+			case CAN_M1_3508_ID:
+			case CAN_M2_3508_ID:
+			case CAN_M3_3508_ID:
+			case CAN_M4_3508_ID:
 			{
-				uint8_t motor_index = (uint8_t)(pRxHeader.Identifier - 0x205U);
-				get_motor_measure(&CHASSIS_MOTOR_MEASURE[motor_index], buf);
-				CHASSIS_MOTOR_MEASURE[motor_index].last_fdb_time = fdb_time;
+				uint8_t motor_index = (uint8_t)(pRxHeader.Identifier - CAN_M1_3508_ID);
+				if (len != 8U)
+				{
+					break;
+				}
+				motor_feedback_update_dji(&CHASSIS_MOTOR_MEASURE[motor_index], buf, fdb_time);
 				/* DJI_MOTOR_MEASURE[4..7] 镜像保存底盘四个 3508 的反馈，便于统一观测。 */
-				get_motor_measure(&DJI_MOTOR_MEASURE[4U + motor_index], buf);
-				DJI_MOTOR_MEASURE[4U + motor_index].last_fdb_time = fdb_time;
+				motor_feedback_update_dji(&DJI_MOTOR_MEASURE[CHASSIS_DJI_MIRROR_BASE_INDEX + motor_index],
+				                          buf, fdb_time);
 				detect_hook((uint8_t)(CHASSIS_MOTOR1_TOE + motor_index));
 				break;
 			}
@@ -442,14 +382,12 @@ uint8_t fdcan2_receive(hcan_t *hfdcan, uint16_t *rec_id, uint8_t *buf)
 			case DM_PIT_MASTER_ID:
 			{
 				int8_t motor_index = get_mit_motor_index(pRxHeader.Identifier);
-				if(motor_index < 0 || motor_index >= 5)
+				if(motor_index < 0 || len != 8U)
 				{
 					return len;
 				}
 
-				can2_cnt = (uint8_t)motor_index;
-				MITFdbData(&MIT_MOTOR_MEASURE[can2_cnt], buf, can2_cnt);
-				MIT_MOTOR_MEASURE[can2_cnt].fdb.last_fdb_time = fdb_time;
+				motor_feedback_update_mit((uint8_t)motor_index, buf, fdb_time);
 				if (pRxHeader.Identifier == DM_PIT_MASTER_ID)
 				{
 					detect_hook(PITCH_GIMBAL_MOTOR_TOE);
@@ -466,26 +404,11 @@ uint8_t fdcan2_receive(hcan_t *hfdcan, uint16_t *rec_id, uint8_t *buf)
 			}
 			case CAN_SMALL_YAW_ID:
 			{
-				get_motor_measure(&DJI_MOTOR_MEASURE[3], buf);
-				DJI_MOTOR_MEASURE[3].last_fdb_time = fdb_time;
-				break;
-			}
-			case CAN_FRIC1_ID:
-			case CAN_FRIC2_ID:
-			case CAN_FRIC3_ID:
-			{
-				//get motor id
-				int8_t motor_index = get_dji_motor_index(pRxHeader.Identifier);
-				if(motor_index < 0 || motor_index >= 8)
+				if (len == 8U)
 				{
-					return len;
+					motor_feedback_update_dji(&DJI_MOTOR_MEASURE[GIMBAL_SMALL_YAW_DJI_INDEX],
+					                          buf, fdb_time);
 				}
-
-				can2_cnt = (uint8_t)motor_index;
-				get_motor_measure(&DJI_MOTOR_MEASURE[can2_cnt], buf);
-
-				DJI_MOTOR_MEASURE[can2_cnt].last_fdb_time = fdb_time;
-				detect_hook((uint8_t)(FRIC1_MOTOR_TOE + motor_index));
 				break;
 			}
 			default:
@@ -517,10 +440,9 @@ uint8_t fdcan3_receive(hcan_t *hfdcan, uint16_t *rec_id, uint8_t *buf)
 			pRxHeader.Identifier == CAN_FRIC3_ID)
 		{
 			int8_t motor_index = get_dji_motor_index(pRxHeader.Identifier);
-			if (motor_index >= 0)
+			if (motor_index >= 0 && len == 8U)
 			{
-				get_motor_measure(&DJI_MOTOR_MEASURE[motor_index], buf);
-				DJI_MOTOR_MEASURE[motor_index].last_fdb_time = HAL_GetTick();
+				motor_feedback_update_dji(&DJI_MOTOR_MEASURE[motor_index], buf, HAL_GetTick());
 				detect_hook((uint8_t)(FRIC1_MOTOR_TOE + motor_index));
 			}
 		}
@@ -638,11 +560,6 @@ void CAN_cmd_CHASSIS_ALL(int16_t motor205, int16_t motor206, int16_t motor207, i
 	canx_send_data(&hfdcan1, CAN_CHASSIS_ALL_ID, data, 8U);
 }
 
-motor_measure_t *get_chassis_motor_measure_point(uint8_t i)
-{
-	return &CHASSIS_MOTOR_MEASURE[i & 0x03U];
-}
- 
  uint32_t g_can_fail_len = 0xFFFF; 
  uint8_t canx_send_data(FDCAN_HandleTypeDef *hcan, uint16_t id, uint8_t *data, uint32_t len)
 {

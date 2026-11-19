@@ -6,6 +6,8 @@
 #ifndef ROBOT_PARAM_H
 #define ROBOT_PARAM_H
 
+#include "robot_map.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -137,10 +139,6 @@ extern "C" {
 #define INS_GYRO_X_ADDRESS_OFFSET          0      // INS gyro x 索引
 #define INS_GYRO_Y_ADDRESS_OFFSET          1      // INS gyro y 索引
 #define INS_GYRO_Z_ADDRESS_OFFSET          2      // INS gyro z 索引
-#define SHOOT_STRUM_MIT_INDEX              0U     // MIT 电机反馈数组中拨弹电机索引
-#define GIMBAL_YAW_MIT_INDEX               1U     // MIT 电机反馈数组中 yaw 电机索引
-#define GIMBAL_ROLL_MIT_INDEX              2U     // MIT 电机反馈数组中 roll 电机索引
-#define GIMBAL_PITCH_MIT_INDEX             3U     // MIT 电机反馈数组中 pitch 电机索引
 #define GIMBAL_MIT_FEEDBACK_INIT_DELAY     100U   // MIT 电机反馈初始化延时，单位 ms
 
 /* ========================= 拨弹控制参数 ========================= */
@@ -212,10 +210,7 @@ extern "C" {
 #define REF_PROTOCOL_FRAME_MAX_SIZE        192   // 裁判系统最大帧长
 #endif
 
-/* ========================= CAN 电机 ID 配置 ========================= */
-/* MIT 电机 CAN ID：命令 ID 为 1~4，反馈 ID 为 0x51~0x54 */
-#define DM_STRUM_CAN_ID                     0X01
-#define DM_BIG_YAW_CAN_ID                   0X02
+/* ========================= 大 yaw 与 roll 机械角配置 ========================= */
 #define GIMBAL_YAW_FOWARD_ANGLE_RAD      -3.0647f    // 大 yaw 朝前机械角
 #define GIMBAL_ROLL_YAW_SAFE_ANGLE_RAD      -2.9554f		// 大 yaw 允许抬放 roll 位置（rad）
 #define GIMBAL_ROLL_YAW_TRIGGER_TOLERANCE_RAD 0.085f // roll 抬放触发时的大 yaw 安全角误差（rad）
@@ -228,50 +223,14 @@ extern "C" {
 #define GIMBAL_ROLL_ARRIVE_ERROR_RAD        0.17453293f // roll 到位角度误差（±10°，rad）
 #define GIMBAL_ROLL_ARRIVE_SPEED_RAD_S      0.1f        // roll 到位角速度阈值（rad/s）
 #define GIMBAL_ROLL_FEEDBACK_TIMEOUT_MS     100U        // roll 反馈超时时间（ms）
-#define DM_YAW_CAN_ID                       DM_BIG_YAW_CAN_ID
-#define DM_ROLL_CAN_ID                      0X04
-#define DM_PIT_CAN_ID                       0X03
-#define DM_STRUM_MASTER_ID                  0X51
-#define DM_BIG_YAW_MASTER_ID                0X52
-#define DM_YAW_MASTER_ID                    DM_BIG_YAW_MASTER_ID
-#define DM_ROLL_MASTER_ID                   0X54
-#define DM_PIT_MASTER_ID                    0X53
-#define CAN_SMALL_YAW_ID                    0X205 // ? yaw DJI 6020 ???? ID
-#define CAN_SMALL_YAW_CURRENT_CMD_ID        0X1FE // GM6020 电流控制帧 ID
 #define SMALL_YAW_FORWARD_ECD               700U  // 小 yaw 朝前时的 6020 编码器值
 #define SMALL_YAW_LOWER_ECD                 520U  // roll 倒下时的小 yaw 目标编码器值
-#define CAN_FRIC1_ID                        0X201 // 摩擦轮 1 电机 ID
-#define CAN_FRIC2_ID                        0X202 // 摩擦轮 2 电机 ID
-#define CAN_FRIC3_ID                        0X203 // 摩擦轮 3 电机 ID
-
-#define CAN_CHASSIS_ALL_ID                0x1FF  // 底盘 3508 电机电流控制广播 ID
-#define CAN_M1_3508_ID                    0x205  // 底盘 3508 电机 1 反馈 ID
-#define CAN_M2_3508_ID                    0x206  // 底盘 3508 电机 2 反馈 ID
-#define CAN_M3_3508_ID                    0x207  // 底盘 3508 电机 3 反馈 ID
-#define CAN_M4_3508_ID                    0x208  // 底盘 3508 电机 4 反馈 ID
-
-#define CHASSIS_MODULE_NUM                4U                 // 底盘电机数量
 
 /* ========================= 底盘几何与电机映射 ========================= */
 /* 十字全向轮底盘：x 轴向右，y 轴向前，轮距 0.56 m */
 #define CHASSIS_HALF_WHEELBASE            0.28f              // 底盘半轮距，用于旋转速度分量计算，单位 m
 #define CHASSIS_OMNI_ROTATE_RADIUS        CHASSIS_HALF_WHEELBASE // 底盘旋转半径，单位 m
 #define Wheel_Radius                      0.075f             // 底盘轮半径，单位 m
-
-#define CHASSIS_WHEEL_205_DIRECTION       1.0f               // 205 号底盘电机方向系数
-#define CHASSIS_WHEEL_206_DIRECTION       -1.0f              // 206 号底盘电机方向系数
-#define CHASSIS_WHEEL_207_DIRECTION       -1.0f              // 207 号底盘电机方向系数
-#define CHASSIS_WHEEL_208_DIRECTION       1.0f               // 208 号底盘电机方向系数
-
-/* 底盘电机 CAN ID 与数组索引映射：205 后轮，206 右轮，207 前轮，208 左轮 */
-#define WHEEL_REAR_205                    0                  // 205 号后轮数组索引
-#define WHEEL_RIGHT_206                   1                  // 206 号右轮数组索引
-#define WHEEL_FRONT_207                   2                  // 207 号前轮数组索引
-#define WHEEL_LEFT_208                    3                  // 208 号左轮数组索引
-#define WHEEL_REAR_RIGHT_205              WHEEL_REAR_205
-#define WHEEL_FRONT_RIGHT_206             WHEEL_RIGHT_206
-#define WHEEL_FRONT_LEFT_207              WHEEL_FRONT_207
-#define WHEEL_REAR_LEFT_208               WHEEL_LEFT_208
 
 /* ========================= 底盘任务周期与输入映射 ========================= */
 #define CHASSIS_TASK_INIT_TIME            500                // 底盘任务启动延时，单位 ms
