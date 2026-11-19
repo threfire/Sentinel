@@ -238,7 +238,7 @@ extern "C" {
 #define DM_PIT_MASTER_ID                    0X53
 #define CAN_SMALL_YAW_ID                    0X205 // ? yaw DJI 6020 ???? ID
 #define CAN_SMALL_YAW_CURRENT_CMD_ID        0X1FE // GM6020 电流控制帧 ID
-#define SMALL_YAW_FORWARD_ECD               670U  // 小 yaw 朝前时的 6020 编码器值
+#define SMALL_YAW_FORWARD_ECD               700U  // 小 yaw 朝前时的 6020 编码器值
 #define SMALL_YAW_LOWER_ECD                 520U  // roll 倒下时的小 yaw 目标编码器值
 #define CAN_FRIC1_ID                        0X201 // 摩擦轮 1 电机 ID
 #define CAN_FRIC2_ID                        0X202 // 摩擦轮 2 电机 ID
