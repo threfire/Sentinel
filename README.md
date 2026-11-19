@@ -1,23 +1,23 @@
-# Hero
+# RoboMaster 哨兵固件
 
-`Hero` 是一套面向 RoboMaster 英雄机器人的 STM32H723VGTx 控制板固件工程。主控基于 STM32 HAL、FreeRTOS CMSIS-RTOS v1、FDCAN、UART DMA、USB CDC 和 OCTOSPI2，实现云台、底盘、发射、自瞄通信、裁判数据解析、在线检测、功率控制、W25Q64 外部 Flash、VOFA 调试和外置灯板状态帧输出。
+本工程是 RoboMaster 哨兵机器人的 STM32H723VGTx 控制板固件。主控基于 STM32 HAL、FreeRTOS CMSIS-RTOS v1、FDCAN、UART DMA、USB CDC 和 OCTOSPI2，实现大小 yaw、pitch、roll 云台、四轮全向底盘、发射、自瞄通信、裁判数据解析、在线检测、功率控制、W25Q64 外部 Flash、VOFA 调试和外置灯板状态帧输出。
 
 当前工程已经将机器人级参数文件整理为 `User/APP_Support/common/robot_param.h`，业务层代码规范见 `代码规范.md`。CubeMX 生成代码仍以 `CtrlBoard-H7_WS1812.ioc` 为入口，手写业务代码集中放在 `User` 目录。
 
 ## 功能特性
 
-- 云台控制：yaw/pitch 双轴控制，支持陀螺仪绝对角、编码器相对角、RAW 输出、初始化、校准、静摩擦补偿、惯量前馈、目标曲线和 pitch 重力补偿。
-- 发射控制：三路 3508 摩擦轮 ADRC 闭环、掉速前馈补偿、拨弹 MIT 电机单发/长按控制、反馈超时保护、电机温度保护、开火检测、弹速估计和热量模型禁发。
-- 发射热量模型：初始热量为 0，开火检测确认一发弹丸后热量 `+100`，热量上限为 `200`，预测下一发会使热量 `>=200` 时禁止拨弹，热量每秒自然下降 `20`。
-- 底盘控制：全向底盘速度规划、运动学正解/逆解、轮速 PID、整车动力学前馈、单轮制动补偿、实际车速反馈、动态电流限制和底盘功率控制。
+- 云台控制：大 yaw MIT 电机使用 HWT906 航向闭环，小 yaw GM6020 使用编码器双环，pitch MIT 电机使用编码器角度控制，roll MIT 电机执行抬放及安全角联锁；自动哨兵在无有效目标时扫描，有效目标出现后切换到视觉跟踪。
+- 发射控制：三路 M2006/C610 摩擦轮 ADRC 速度闭环、掉速前馈补偿、MIT 拨弹电机连续速度控制、反馈超时保护、电机温度保护、开火检测和弹速估计。
+- 发射热量模型：开火检测更新软件热量和灯板显示；当前热量统计不清零拨弹目标速度或力矩。
+- 底盘控制：四轮全向底盘速度规划、运动学正解/逆解、轮速 PID、整车动力学前馈、单轮制动补偿、实际车速反馈、动态电流限制和功率控制；roll 倒下时可执行底盘航向保持。
 - 自瞄通信：USB CDC + uproto + channel 框架，包含云台状态发布、自瞄增量注入、主机底盘/射击命令注入、相机触发和时间同步通道。
 - 裁判与功控：裁判系统结构解析入口、枪口热量读取接口、底盘功率和缓冲能量读取接口、PM01 超级电容对象字典访问、底盘功率限制接口。
 - 在线检测：DBUS、底盘电机、云台电机、摩擦轮和拨弹电机在线状态检测，供任务保护、零输出保护和灯板显示使用。
 - 灯板显示：主控 UART8 输出 10 路 RGB 状态帧，外置 CH32V003F4P 灯板固件驱动 WS2812 灯珠；8 号提示灯显示发射热量，颜色从绿到黄再到红。
 - 外部 Flash：OCTOSPI2 驱动 W25Q64，支持 JEDEC ID 校验、4 KB 扇区擦除、32 KB/64 KB 块擦除、整片擦除、页写入、连续读写和内存映射。
 - Flash 错误日志：`flash_log` 把短文本错误事件缓存到 RAM 队列，再由 `service_task` 周期写入 W25Q64 末尾 64 KB 日志区。
-- 服务任务：`service_task` 统一调度 HWT IMU 初始化、Flash 日志初始化、WS2812、蜂鸣器、VOFA 6 通道发送和日志落盘服务。
-- 调试支持：VOFA 固定 6 通道数据发送、Keil 构建日志、弹道/惯量测试数据、MATLAB 拟合脚本和控制链路图。
+- 服务任务：`service_task` 统一调度 HWT906 初始化、Flash 日志初始化、WS2812、蜂鸣器、VOFA 数据发送和日志落盘服务。
+- 调试支持：VOFA 提供 6/12 通道 JustFloat DMA 发送接口，当前服务输出自动哨兵的小 yaw、pitch 目标与反馈；另有 Keil 构建日志和 MATLAB 拟合脚本。
 
 ## 技术栈
 
@@ -35,7 +35,7 @@
 ## 目录结构
 
 ```text
-Hero/
+烧饼/
 ├── Core/                                   # STM32CubeMX 生成的主控基础工程
 │   ├── Inc/                                # 外设句柄、HAL 配置、FreeRTOSConfig 和中断声明
 │   │   ├── main.h                          # 全局 HAL 入口和 GPIO 宏
@@ -122,7 +122,7 @@ Hero/
 │   │       ├── host/                       # C/C++ 主机端示例和 CMake 工程
 │   │       └── shared/                     # 主机与设备共享协议 ID
 │   └── Devices/                            # 具体设备驱动和调试输出
-│       ├── hwt_imu.c / hwt_imu.h           # HWT101/HWT906 IMU 数据解析
+│       ├── hwt_imu.c / hwt_imu.h           # HWT906 IMU 数据解析
 │       ├── vofa.c / vofa.h                 # VOFA 调试数据发送
 │       ├── w25q64.c / w25q64.h             # W25Q64 初始化、擦除、读写和内存映射
 │       └── ws2812.c / ws2812.h             # 板载 WS2812 驱动
@@ -169,8 +169,8 @@ Hero/
 1. 获取代码：
 
 ```powershell
-git clone <repo-url>
-cd Hero
+git clone <repo-url> 烧饼
+cd 烧饼
 ```
 
 2. 打开主控工程：
@@ -288,9 +288,17 @@ shoot_task_set_mode
 -> fired_bullet_count++
 -> heat += SHOOT_HEAT_PER_BULLET
 -> shoot_task_fire_heat_would_over_limit
--> 拨弹入口禁止继续打弹
+-> heat_limit_active 状态更新
 -> light_render_shoot_heat_status 显示热量色域
 ```
+
+### 遥控与运动模式
+
+右拨杆 S0：下档为整车无力，中档为底盘跟随云台；roll 完全倒下时，中档底盘改为 HWT906 航向保持，大 yaw 锁在 roll 安全角。S0 从中档进入上档后等待 `GIMBAL_AUTO_SENTINEL_REPEAT_WINDOW_MS`（500 ms）：单次上拨进入小陀螺，窗口内连续两次进入自动哨兵。自动哨兵底盘静止，云台无有效视觉目标时执行小 yaw/pitch 正弦扫描，有效目标出现时切换跟踪。
+
+左拨杆 S1：上拨回中触发 roll 抬放请求，大 yaw 先回到 `GIMBAL_ROLL_YAW_SAFE_ANGLE_RAD`，进入允许范围后执行抬放；摩擦轮或拨弹工作时禁止倒下。S1 在 800 ms 内连续两次下拨切换摩擦轮开关；摩擦轮已开启且 S1 保持下档至少 500 ms 时拨弹持续转动。
+
+小陀螺角速度按 1000 ms 周期在 `CHASSIS_SPIN_MIN_SPEED`（2.2 rad/s）和 `CHASSIS_SPIN_SPEED`（3.28 rad/s）之间正弦变化；退出小陀螺时由 `CHASSIS_SPIN_EXIT_WZ_FILTER_ALPHA`（0.015）逐周期过渡到云台跟随目标。自动哨兵扫描切入的 800 ms 平滑参数为 `GIMBAL_DEBUG_SINE_ENTRY_MS`，用于小 yaw/pitch 扫描目标。
 
 service 任务启动链路：
 
@@ -345,7 +353,7 @@ on_tick / on_rx
 | 参数 | 当前值 | 含义 |
 |---|---:|---|
 | `SHOOT_HEAT_PER_BULLET` | `100U` | 开火检测确认一发弹丸后的热量增量 |
-| `SHOOT_HEAT_LIMIT` | `200U` | 热量上限，预测下一发达到或超过该值时禁止拨弹 |
+| `SHOOT_HEAT_LIMIT` | `200U` | 软件热量状态阈值 |
 | `SHOOT_HEAT_COOL_PER_SECOND` | `20U` | 每秒自然冷却热量 |
 | `SHOOT_HEAT_DECAY_INTERVAL_MS` | `50U` | 每 50 ms 热量下降 1 |
 
@@ -356,15 +364,15 @@ on_tick / on_rx
 | `fired_bullet_count` | 开火检测确认的打弹数量 |
 | `heat` | 当前软件热量模型值 |
 | `heat_cool_ticks` | 热量冷却计时 |
-| `heat_limit_active` | 下一发会达到或超过热量上限时置位 |
+| `heat_limit_active` | 下一发预计达到或超过热量阈值时置位，用于状态显示 |
 
-禁发条件为：
+热量状态计算条件为：
 
 ```c
 heat + SHOOT_HEAT_PER_BULLET >= SHOOT_HEAT_LIMIT
 ```
 
-在当前参数下，第一发后热量变为 100；第二发会使热量达到 200，因此在热量冷却到 99 之前禁止继续拨弹。
+当前拨弹控制由摩擦轮使能、三轮与拨弹电机反馈在线及遥控输入决定；热量模型持续统计并显示，暂不作为拨弹使能门控。
 
 ## 灯板显示
 
@@ -406,14 +414,14 @@ heat + SHOOT_HEAT_PER_BULLET >= SHOOT_HEAT_LIMIT
 
 | 外设 | 配置 | 用途 |
 |---|---|---|
-| FDCAN1 | Classic CAN，1 Mbps | yaw MIT、拨弹 MIT、底盘电机、PM01 |
-| FDCAN2 | Classic CAN，1 Mbps | pitch MIT、三路摩擦轮 |
-| FDCAN3 | Classic CAN，0.25 Mbps | 预留接收入口 |
+| FDCAN1 | Classic CAN，具体位时序见 `.ioc` | 大 yaw MIT、四个底盘 3508、PM01 |
+| FDCAN2 | Classic CAN，具体位时序见 `.ioc` | 小 yaw GM6020、pitch/roll/拨弹 MIT |
+| FDCAN3 | Classic CAN，具体位时序见 `.ioc` | 三路 M2006/C610 摩擦轮 |
 | UART5 | 100000 baud，8E1，DMA RX | DBUS/SBUS 遥控器 |
-| UART7 | 115200 baud，DMA RX/TX | HWT101 接收 |
+| UART7 | 115200 baud，DMA RX/TX | 接收 DMA 保留，当前无 HWT101 解算 |
 | UART8 | 115200 baud，DMA TX | 外置灯板发送 |
-| USART1 | 921600 baud，DMA RX/TX | 裁判系统/串口通信入口 |
-| USART10 | 921600 baud，DMA RX/TX | HWT906 或扩展通信 |
+| USART1 | 921600 baud，DMA RX/TX | 裁判系统接收、VOFA DMA 发送 |
+| USART10 | 921600 baud，DMA RX/TX | HWT906 接收 |
 | USB_DEVICE | CDC HS | 上位机通信 |
 | OCTOSPI2 | Quad SPI，8 MB 地址空间 | W25Q64 外部 Flash |
 | TIM24 | 内部时钟，Prescaler 239 | 微秒时间基 |
@@ -566,10 +574,12 @@ flash_log_enqueue_error()
 
 | 设备 | 总线 | 命令 ID | 反馈 ID |
 |---|---|---:|---|
-| yaw MIT 电机 | FDCAN1 | `0x01` | `0x51` |
-| pitch MIT 电机 | FDCAN2 | `0x02` | `0x52` |
-| 拨弹 MIT 电机 | FDCAN1 | `0x03` | `0x53` |
-| 摩擦轮 1/2/3 | FDCAN2 | `0x200` | `0x201` / `0x202` / `0x203` |
+| 大 yaw MIT 电机 | FDCAN1 | `0x02` | `0x52` |
+| pitch MIT 电机 | FDCAN2 | `0x03` | `0x53` |
+| roll MIT 电机 | FDCAN2 | `0x04` | `0x54` |
+| 拨弹 MIT 电机 | FDCAN2 | `0x01` | `0x51` |
+| 小 yaw GM6020 | FDCAN2 | `0x1FE` | `0x205` |
+| 摩擦轮 1/2/3 M2006/C610 | FDCAN3 | `0x200` | `0x201` / `0x202` / `0x203` |
 | 底盘 3508 电机组 | FDCAN1 | `0x1FF` | `0x205` ~ `0x208` |
 | PM01 超级电容 | FDCAN1 | `0x600` ~ `0x603` | `0x600` ~ `0x603`、`0x610` ~ `0x613` |
 
@@ -587,8 +597,8 @@ flash_log_enqueue_error()
 - `User/APP_Support/chassis/chassis_calculate.*` 负责底盘运动学正解、逆解、坐标旋转和运动学限幅。
 - `User/APP_Support/chassis/Omni_chassis.*` 负责底盘初始化、反馈更新、目标生成、速度规划、轮速控制、制动补偿和 CAN 发送。
 - `User/APP_Support/gimbal/gimbal_behaviour.*` 负责云台行为模式映射。
-- `User/APP_Support/gimbal/yaw_pitch_direct.*` 负责 yaw-pitch 云台反馈、目标生成、PID/前馈/摩擦补偿和 MIT/3508 输出。
-- `User/APP_Support/shoot/shoot.*` 负责 3508 摩擦轮和拨弹机构控制。
+- `User/APP_Support/gimbal/yaw_pitch_direct.*` 负责大小 yaw、pitch、roll 反馈、目标生成及 MIT/GM6020 输出。
+- `User/APP_Support/shoot/shoot.*` 负责 M2006/C610 摩擦轮和 MIT 拨弹机构控制。
 - `User/APP_Support/power_control/*` 负责底盘功率预测、功率限幅、电流缩放和功率模块通信。
 - `User/BSP/*` 负责板级外设封装、CAN/UART/TIM/DWT 和遥控器底层数据。
 - `User/Devices/w25q64.*` 负责 W25Q64 初始化、擦除、读写和内存映射。
@@ -624,7 +634,7 @@ flash_log_enqueue_error()
 - 模式切换在 `*_mode_change_control_transit` 中处理，切换时保存目标角、相对角、规划速度、积分项或上一模式。
 - 掉线和超时状态通过 `toe_is_error`、反馈时间戳、`online`、`error_code` 进入零输出、无力或保持逻辑。
 - CAN 发送函数集中在 `*_send_cmd` 或 BSP CAN 封装中，控制函数只写目标值、中间控制量和最终电流命令。
-- VOFA 输出固定 6 通道，统一经过 `VOFA_Send6`。
+- VOFA 通过 USART1 DMA 输出 JustFloat 帧，现有调试接口支持 6 或 12 通道。
 
 ### CubeMX 修改约束
 
@@ -683,7 +693,7 @@ cd .\User\Communication\example\host
 
 当前底盘控制链路已经包含目标生成、速度规划、运动学计算、功控计算、电流变量写入和 CAN 下发。恢复实车输出或改动底盘控制时，需要沿 `chassis_set_mode -> chassis_feedback_update -> chassis_set_contorl -> chassis_control_loop -> chassis_send_cmd` 链路接入。
 
-当前发射控制链路通过摩擦轮掉速和反馈电流判断开火，再由软件热量模型限制下一发拨弹。该模型不替代裁判系统热量数据；裁判热量接口仍在 `referee.c/referee.h` 中保留，可在后续需要时与软件模型融合。
+当前发射控制链路通过摩擦轮掉速和反馈电流判断开火，并更新软件热量模型；拨弹使能依照摩擦轮和电机反馈状态。裁判热量接口保留在 `referee.c/referee.h`。
 
 当前外部 Flash 链路由 `Core/Src/main.c` 初始化 OCTOSPI2，再调用 `OSPI_W25Qxx_Init()` 校验 W25Q64 ID；Flash 日志由 `service_task` 初始化并周期服务，控制循环只调用 `flash_log_enqueue_error()` 入队事件。
 
