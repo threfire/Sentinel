@@ -1332,6 +1332,11 @@
           <GroupName>APP_Support/common</GroupName>
           <Files>
             <File>
+              <FileName>robot_map.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\User\APP_Support\common\robot_map.h</FilePath>
+            </File>
+            <File>
               <FileName>robot_param.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\User\APP_Support\common\robot_param.h</FilePath>
@@ -1581,6 +1586,16 @@
         <Group>
           <GroupName>Devices</GroupName>
           <Files>
+            <File>
+              <FileName>motor_feedback.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\User\Devices\motor_feedback.h</FilePath>
+            </File>
+            <File>
+              <FileName>motor_feedback.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\Devices\motor_feedback.c</FilePath>
+            </File>
             <File>
               <FileName>vofa.c</FileName>
               <FileType>1</FileType>
