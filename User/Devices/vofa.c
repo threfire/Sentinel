@@ -33,7 +33,7 @@ static VOFA_JustFloatFrame_t s_vofa_frame12 =
 
 static void VOFA_Send6(float ch0, float ch1, float ch2, float ch3, float ch4, float ch5)
 {
-    if (huart7.gState != HAL_UART_STATE_READY)
+    if (huart1.gState != HAL_UART_STATE_READY)
     {
         return;
     }
@@ -45,14 +45,14 @@ static void VOFA_Send6(float ch0, float ch1, float ch2, float ch3, float ch4, fl
     s_vofa_frame6.fdata[4] = ch4;
     s_vofa_frame6.fdata[5] = ch5;
 
-    HAL_UART_Transmit_DMA(&huart7, (uint8_t *)&s_vofa_frame6, sizeof(s_vofa_frame6));
+    HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&s_vofa_frame6, sizeof(s_vofa_frame6));
 }
 
 static void VOFA_Send12(float ch0, float ch1, float ch2, float ch3,
                         float ch4, float ch5, float ch6, float ch7,
                         float ch8, float ch9, float ch10, float ch11)
 {
-    if (huart7.gState != HAL_UART_STATE_READY)
+    if (huart1.gState != HAL_UART_STATE_READY)
     {
         return;
     }
@@ -70,7 +70,7 @@ static void VOFA_Send12(float ch0, float ch1, float ch2, float ch3,
     s_vofa_frame12.fdata[10] = ch10;
     s_vofa_frame12.fdata[11] = ch11;
 
-    HAL_UART_Transmit_DMA(&huart7, (uint8_t *)&s_vofa_frame12, sizeof(s_vofa_frame12));
+    HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&s_vofa_frame12, sizeof(s_vofa_frame12));
 }
 
 void VOFA_SendChassisMotorMeasure(uint8_t motor_idx)
@@ -82,7 +82,7 @@ void VOFA_SendChassisMotorMeasure(uint8_t motor_idx)
         return;
     }
 
-    if (huart7.gState != HAL_UART_STATE_READY)
+    if (huart1.gState != HAL_UART_STATE_READY)
     {
         return;
     }

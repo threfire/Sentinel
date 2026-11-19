@@ -16,7 +16,7 @@
 #include "gimbal_behaviour.h"
 #include "shoot_task.h"
 
-/* 灯位状态定义：0=DBUS 在线，1=底盘电机在线，2=摩擦轮在线，3=自瞄在线，4~6=底盘行为，7=云台行为，8=超级电容，9=任务心跳。 */
+/* 灯位状态定义：0=DBUS在线，1=底盘电机，2=云台电机，3=摩擦轮，4=自瞄，5=机器人模式，6=底盘模式，7=云台模式，8=发射热量，9=心跳。 */
 
 
 
@@ -31,6 +31,7 @@ static light_control_t light_control = {
 static void light_render_auto(void);
 static void light_update_online_status(void);
 static bool light_chassis_motor_online(void);
+static bool light_gimbal_motor_online(void);
 static bool light_fric_motor_online(void);
 static bool light_fric_one_motor_online(const shoot_task_motor_t *motor, uint32_t now);
 static bool light_fric_motor_working(void);
@@ -38,6 +39,7 @@ static bool light_fric_motor_running(void);
 static float light_fric_average_speed_rpm(void);
 static float light_abs_float(float value);
 static void light_render_online_status(void);
+static void light_render_robot_mode(void);
 static void light_render_chassis_status(void);
 static void light_render_gimbal_status(void);
 static void light_render_shoot_heat_status(void);
@@ -99,6 +101,7 @@ static void light_render_auto(void)
     light_clear();
 
     light_render_online_status();
+    light_render_robot_mode();
     light_render_chassis_status();
     light_render_gimbal_status();
     light_render_shoot_heat_status();
@@ -118,6 +121,8 @@ static void light_update_online_status(void)
         (toe_is_error(DBUS_TOE) == 0U);
     light_control.online.chassis_motor_online =
         light_chassis_motor_online();
+    light_control.online.gimbal_motor_online =
+        light_gimbal_motor_online();
     light_control.online.fric_motor_online =
         light_fric_motor_online();
     light_control.online.fric_motor_working =
@@ -143,6 +148,15 @@ static bool light_chassis_motor_online(void)
     }
 
     return true;
+}
+
+
+/* 判断 yaw、roll、pitch 三个云台电机是否全部在线。 */
+static bool light_gimbal_motor_online(void)
+{
+    return (toe_is_error(YAW_GIMBAL_MOTOR_TOE) == 0U) &&
+           (toe_is_error(ROLL_GIMBAL_MOTOR_TOE) == 0U) &&
+           (toe_is_error(PITCH_GIMBAL_MOTOR_TOE) == 0U);
 }
 
 
@@ -215,7 +229,7 @@ static float light_abs_float(float value)
 }
 
 
-/* 刷新 0~3 号在线状态灯。 */
+/* 刷新 0~4 号在线状态灯。 */
 static void light_render_online_status(void)
 {
     if (light_control.online.dbus_online)
@@ -229,113 +243,124 @@ static void light_render_online_status(void)
 
     if (light_control.online.chassis_motor_online)
     {
-        light_set_pixel(LIGHT_CHASSIS_ONLINE_LED, 0U, LIGHT_MID, 0U);
+        light_set_pixel(LIGHT_CHASSIS_MOTOR_ONLINE_LED, 0U, LIGHT_MID, 0U);
     }
     else
     {
-        light_set_pixel(LIGHT_CHASSIS_ONLINE_LED, LIGHT_HIGH, 0U, 0U);
+        light_set_pixel(LIGHT_CHASSIS_MOTOR_ONLINE_LED, LIGHT_HIGH, 0U, 0U);
+    }
+
+    if (light_control.online.gimbal_motor_online)
+    {
+        light_set_pixel(LIGHT_GIMBAL_MOTOR_ONLINE_LED, 0U, LIGHT_MID, 0U);
+    }
+    else
+    {
+        light_set_pixel(LIGHT_GIMBAL_MOTOR_ONLINE_LED, LIGHT_HIGH, 0U, 0U);
     }
 
     if (light_control.online.fric_motor_online)
     {
         if (!light_control.online.fric_motor_working)
         {
-            light_set_pixel(LIGHT_FRIC_ONLINE_LED, LIGHT_HIGH, LIGHT_HIGH, 0U);
+            light_set_pixel(LIGHT_FRIC_STATUS_LED, LIGHT_HIGH, LIGHT_HIGH, 0U);
         }
         else if (light_control.online.fric_motor_running)
         {
-            light_set_pixel(LIGHT_FRIC_ONLINE_LED, 0U, LIGHT_MID, LIGHT_MID);
+            light_set_pixel(LIGHT_FRIC_STATUS_LED, 0U, LIGHT_MID, LIGHT_MID);
         }
         else
         {
-            light_set_pixel(LIGHT_FRIC_ONLINE_LED, 0U, LIGHT_MID, 0U);
+            light_set_pixel(LIGHT_FRIC_STATUS_LED, 0U, LIGHT_MID, 0U);
         }
     }
     else
     {
-        light_set_pixel(LIGHT_FRIC_ONLINE_LED, LIGHT_HIGH, 0U, 0U);
+        light_set_pixel(LIGHT_FRIC_STATUS_LED, LIGHT_HIGH, 0U, 0U);
     }
 
     if (light_control.online.auto_aim_active)
     {
-        light_set_pixel(LIGHT_AUTO_AIM_ONLINE_LED, 0U, LIGHT_MID, 0U);
+        light_set_pixel(LIGHT_AUTO_AIM_STATUS_LED, 0U, LIGHT_MID, 0U);
     }
     else if (light_control.online.auto_aim_online)
     {
-        light_set_pixel(LIGHT_AUTO_AIM_ONLINE_LED, LIGHT_HIGH, LIGHT_HIGH, 0U);
+        light_set_pixel(LIGHT_AUTO_AIM_STATUS_LED, LIGHT_HIGH, LIGHT_HIGH, 0U);
     }
     else
     {
-        light_set_pixel(LIGHT_AUTO_AIM_ONLINE_LED, LIGHT_HIGH, 0U, 0U);
+        light_set_pixel(LIGHT_AUTO_AIM_STATUS_LED, LIGHT_HIGH, 0U, 0U);
     }
 }
 
 
-/* 刷新 4~6 号灯，显示底盘行为模式。 */
+/* 刷新 5 号灯，显示机器人总模式。 */
+static void light_render_robot_mode(void)
+{
+    switch (gimbal_total_mode_get())
+    {
+        case GIMBAL_TOTAL_MOTIONLESS:
+            light_set_pixel(LIGHT_ROBOT_MODE_LED, LIGHT_LOW, 0U, 0U);
+            break;
+
+        case GIMBAL_TOTAL_FOLLOW:
+            light_set_pixel(LIGHT_ROBOT_MODE_LED, 0U, LIGHT_MID, 0U);
+            break;
+
+        case GIMBAL_TOTAL_SPIN:
+            light_set_pixel(LIGHT_ROBOT_MODE_LED, LIGHT_LOW, 0U, LIGHT_MID);
+            break;
+
+        case GIMBAL_TOTAL_AUTO_SENTINEL:
+            light_set_pixel(LIGHT_ROBOT_MODE_LED, 0U, LIGHT_MID, LIGHT_MID);
+            break;
+
+        default:
+            light_set_pixel(LIGHT_ROBOT_MODE_LED, LIGHT_LOW, 0U, 0U);
+            break;
+    }
+}
+
+
+/* 刷新 6 号灯，显示底盘行为模式。 */
 static void light_render_chassis_status(void)
 {
     switch (chassis_behaviour_mode)
     {
         case CHASSIS_NO_MOVE:
-            light_fill(LIGHT_CHASSIS_STATUS_FIRST_LED,
-                       LIGHT_CHASSIS_STATUS_LAST_LED,
-                       0U,
-                       0U,
-                       LIGHT_DIM);
+            light_set_pixel(LIGHT_CHASSIS_MODE_LED, 0U, 0U, LIGHT_DIM);
             break;
 
         case CHASSIS_FOLLOW_GIMBAL_YAW:
-            light_fill(LIGHT_CHASSIS_STATUS_FIRST_LED,
-                       LIGHT_CHASSIS_STATUS_LAST_LED,
-                       0U,
-                       LIGHT_MID,
-                       LIGHT_MID);
+            light_set_pixel(LIGHT_CHASSIS_MODE_LED, 0U, LIGHT_MID, 0U);
+            break;
+
+        case CHASSIS_YAW_HOLD:
+            light_set_pixel(LIGHT_CHASSIS_MODE_LED, 0U, LIGHT_MID, LIGHT_MID);
             break;
 
         case CHASSIS_SPIN:
-            light_fill(LIGHT_CHASSIS_STATUS_FIRST_LED,
-                       LIGHT_CHASSIS_STATUS_LAST_LED,
-                       LIGHT_LOW,
-                       0U,
-                       LIGHT_MID);
+            light_set_pixel(LIGHT_CHASSIS_MODE_LED, LIGHT_LOW, 0U, LIGHT_MID);
             break;
 
         case CHASSIS_RETURN:
         default:
-            light_fill(LIGHT_CHASSIS_STATUS_FIRST_LED,
-                       LIGHT_CHASSIS_STATUS_LAST_LED,
-                       LIGHT_MID,
-                       LIGHT_MID,
-                       0U);
+            light_set_pixel(LIGHT_CHASSIS_MODE_LED, LIGHT_MID, LIGHT_MID, 0U);
             break;
     }
 }
 
 
-/* 刷新 7 号灯，显示云台行为模式。 */
+/* 刷新 7 号灯，显示 roll 抬升/倒下动作许可。 */
 static void light_render_gimbal_status(void)
 {
-    switch (gimbal_behaviour)
+    if (gimbal_roll_control_is_allowed())
     {
-        case GIMBAL_ZERO_FORCE:
-        case GIMBAL_MOTIONLESS:
-            light_set_pixel(LIGHT_GIMBAL_STATUS_LED, LIGHT_LOW, 0U, 0U);
-            break;
-
-        case GIMBAL_INIT:
-        case GIMBAL_CALI:
-            light_set_pixel(LIGHT_GIMBAL_STATUS_LED, LIGHT_MID, LIGHT_MID, 0U);
-            break;
-
-        case GIMBAL_SPIN:
-            light_set_pixel(LIGHT_GIMBAL_STATUS_LED, LIGHT_LOW, 0U, LIGHT_MID);
-            break;
-
-        case GIMBAL_ABSOLUTE_ANGLE:
-        case GIMBAL_RELATIVE_ANGLE:
-        default:
-            light_set_pixel(LIGHT_GIMBAL_STATUS_LED, 0U, LIGHT_MID, 0U);
-            break;
+        light_set_pixel(LIGHT_GIMBAL_MODE_LED, 0U, LIGHT_HIGH, 0U);
+    }
+    else
+    {
+        light_set_pixel(LIGHT_GIMBAL_MODE_LED, LIGHT_HIGH, 0U, 0U);
     }
 }
 
@@ -413,7 +438,7 @@ static void light_pack_frame(void)
 static void light_send_frame(void)
 {
     light_pack_frame();
-    USART8_Transmit(light_control.frame, (uint16_t)sizeof(light_control.frame));
+    USART7_Transmit(light_control.frame, (uint16_t)sizeof(light_control.frame));
 }
 
 

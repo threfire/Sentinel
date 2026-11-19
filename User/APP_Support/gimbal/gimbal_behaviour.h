@@ -58,7 +58,7 @@ extern volatile gimbal_behaviour_e gimbal_behaviour;
 #endif
 
 #ifndef GIMBAL_YAW_ORIGIN_TOLERANCE
-#define GIMBAL_YAW_ORIGIN_TOLERANCE 0.16f
+#define GIMBAL_YAW_ORIGIN_TOLERANCE 0.015f
 #endif
 
 /**
@@ -90,6 +90,7 @@ bool gimbal_roll_is_lifted(void);
 bool gimbal_roll_target_is_lifted(void);
 bool gimbal_roll_motion_is_active(void);
 bool gimbal_roll_control_is_allowed(void);
+bool gimbal_roll_safe_yaw_request_is_active(void);
 bool gimbal_small_yaw_control_is_allowed(void);
 void gimbal_roll_motion_complete(void);
 void gimbal_roll_motion_cancel(void);

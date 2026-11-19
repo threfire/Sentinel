@@ -46,6 +46,10 @@ typedef struct
     float absolute_angle;            // 绝对角度反馈值
     float absolute_angle_set;        // 绝对角度目标值
 
+    float raw_absolute_angle;        // 原始电机绝对角度反馈值
+    float raw_relative_angle;        // 原始电机相对角度反馈值
+    float raw_relative_speed;        // 原始电机相对角速度反馈值
+
     float angle_offset;              // 上电/初始化时记录的角度零偏
     uint8_t angle_offset_init;       // 角度零偏是否已初始化
 
@@ -104,9 +108,6 @@ typedef struct
     float speed_feedback_rad_s;        // 小 yaw 角速度反馈，单位 rad/s
     uint16_t last_ecd;                 // 小 yaw 上一帧编码器值
     uint8_t feedback_init;              // 小 yaw 编码器反馈初始化标志
-    uint8_t scan_yaw_direction;         // 小 yaw 扫描方向
-    uint8_t scan_pitch_direction;       // pitch 扫描方向
-    float scan_pitch_target_rad;        // pitch 扫描目标角度，单位 rad
 } gimbal_small_yaw_t;
 
 typedef struct
@@ -130,6 +131,7 @@ typedef struct
     bool roll_motion_active;
     bool roll_state_initialized;
     bool roll_control_allowed;
+    bool roll_safe_yaw_pending;
     bool friction_enabled;
     bool strum_enabled;
 } gimbal_behaviour_state_t;

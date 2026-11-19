@@ -31,14 +31,14 @@
 #define LIGHT_FRIC_FDB_TIMEOUT 300U
 
 #define LIGHT_DBUS_ONLINE_LED 0U
-#define LIGHT_CHASSIS_ONLINE_LED 1U
-#define LIGHT_FRIC_ONLINE_LED 2U
-#define LIGHT_AUTO_AIM_ONLINE_LED 3U
-#define LIGHT_CHASSIS_STATUS_FIRST_LED 4U
-#define LIGHT_CHASSIS_STATUS_LAST_LED 6U
-#define LIGHT_GIMBAL_STATUS_LED 7U
-#define LIGHT_CAP_STATUS_LED 8U
-#define LIGHT_SHOOT_HEAT_LED LIGHT_CAP_STATUS_LED
+#define LIGHT_CHASSIS_MOTOR_ONLINE_LED 1U
+#define LIGHT_GIMBAL_MOTOR_ONLINE_LED 2U
+#define LIGHT_FRIC_STATUS_LED 3U
+#define LIGHT_AUTO_AIM_STATUS_LED 4U
+#define LIGHT_ROBOT_MODE_LED 5U
+#define LIGHT_CHASSIS_MODE_LED 6U
+#define LIGHT_GIMBAL_MODE_LED 7U
+#define LIGHT_SHOOT_HEAT_LED 8U
 #define LIGHT_HEARTBEAT_LED 9U
 
 typedef enum
@@ -58,6 +58,7 @@ typedef struct
 {
     bool dbus_online;
     bool chassis_motor_online;
+    bool gimbal_motor_online;
     bool fric_motor_online;
     bool fric_motor_working;
     bool fric_motor_running;

@@ -4,6 +4,7 @@
   * @note       接收视觉 yaw/pitch 偏差并提供给云台控制读取。
   */
 #include "auto_aim.h"
+#include "gimbal_behaviour.h"
 
 #include "FreeRTOS.h"
 #include "cmsis_os.h"
@@ -22,7 +23,6 @@ static auto_aim_error_t s_auto_aim_error = {0};
 static float auto_aim_calc_pitch_compensation_rad(float horizontal_distance_m);
 static void auto_aim_init(auto_aim_t *aim_obj);
 static void auto_aim_set(auto_aim_t *aim_obj);
-static void auto_aim_feedback_update(auto_aim_t *aim_obj);
 
 static float auto_aim_calc_pitch_compensation_rad(float horizontal_distance_m)
 {
@@ -87,7 +87,16 @@ float auto_aim_get_pitch_err_rad(void)
   */
 uint8_t auto_aim_is_active(void)
 {
-    return (uint8_t)((aim.auto_aim_flag == AIM_ON) && (aim.online != 0U));
+    uint8_t active;
+
+    taskENTER_CRITICAL();
+    active = (uint8_t)((gimbal_behaviour == GIMBAL_AUTO_SENTINEL) &&
+                       (aim.online != 0U) &&
+                       ((aim.status & AUTO_AIM_STATUS_TARGET_VALID) != 0U) &&
+                       (HAL_GetTick() - aim.last_fdb <= AUTO_AIM_TIMEOUT));
+    taskEXIT_CRITICAL();
+
+    return active;
 }
 
 /**
@@ -114,7 +123,6 @@ void auto_aim_task(void *pvParameters)
     while (1)
     {
         auto_aim_set(&aim);
-        auto_aim_feedback_update(&aim);
         osDelay(AUTO_AIM_TIME);
     }
 }
@@ -132,7 +140,7 @@ void auto_aim_apply_delta_udeg(int32_t dyaw_udeg,
                                uint16_t status,
                                uint64_t ts_us)
 {
-    const bool no_aim_data = (dyaw_udeg == 0) && (dpitch_udeg == 0);
+    const bool no_aim_data = (status & AUTO_AIM_STATUS_TARGET_VALID) == 0U;
     const float yaw_err_rad =
         no_aim_data ? 0.0f : ((float)dyaw_udeg * AUTO_AIM_UDEG_TO_RAD);
     const float pitch_err_rad =
@@ -147,10 +155,9 @@ void auto_aim_apply_delta_udeg(int32_t dyaw_udeg,
     aim.delta_pitch_udeg = dpitch_udeg;
     aim.status = status;
     aim.ts_us = ts_us;
-    taskEXIT_CRITICAL();
-
     aim.online = 1U;
     aim.last_fdb = HAL_GetTick();
+    taskEXIT_CRITICAL();
 }
 
 static void auto_aim_init(auto_aim_t *aim_obj)
@@ -160,8 +167,8 @@ static void auto_aim_init(auto_aim_t *aim_obj)
         return;
     }
 
-    aim_obj->online = 1U;
-    aim_obj->auto_aim_flag = (AUTO_AIM_SOFT_ENABLE != 0) ? AIM_ON : AIM_OFF;
+    aim_obj->online = 0U;
+    aim_obj->auto_aim_flag = AIM_OFF;
     aim_obj->last_fdb = 0U;
     aim_obj->delta_yaw_udeg = 0;
     aim_obj->delta_pitch_udeg = 0;
@@ -174,44 +181,20 @@ static void auto_aim_init(auto_aim_t *aim_obj)
 
 static void auto_aim_set(auto_aim_t *aim_obj)
 {
-    static bool last_press_r = false;
-    bool press_r;
-
     if (aim_obj == NULL)
     {
         return;
     }
 
-#if ROBOT_MODE == release
+    taskENTER_CRITICAL();
+    aim_obj->auto_aim_flag =
+        (gimbal_behaviour == GIMBAL_AUTO_SENTINEL) ? AIM_ON : AIM_OFF;
     if (HAL_GetTick() - aim_obj->last_fdb > AUTO_AIM_TIMEOUT)
     {
         aim_obj->online = 0U;
-        aim_obj->auto_aim_flag = AIM_OFF;
-        auto_aim_clear_error();
-        return;
+        aim_obj->status = 0U;
+        s_auto_aim_error.yaw_err_rad = 0.0f;
+        s_auto_aim_error.pitch_err_rad = 0.0f;
     }
-#endif
-
-    press_r = (aim_obj->aim_rc != NULL) &&
-              ((aim_obj->aim_rc->key.v & KEY_PRESSED_OFFSET_R) != 0U);
-
-    if (press_r && !last_press_r)
-    {
-        aim_obj->auto_aim_flag =
-            (aim_obj->auto_aim_flag == AIM_OFF) ? AIM_ON : AIM_OFF;
-    }
-    last_press_r = press_r;
-}
-
-static void auto_aim_feedback_update(auto_aim_t *aim_obj)
-{
-    if (aim_obj == NULL)
-    {
-        return;
-    }
-
-    if (aim_obj->auto_aim_flag == AIM_OFF)
-    {
-        auto_aim_clear_error();
-    }
+    taskEXIT_CRITICAL();
 }

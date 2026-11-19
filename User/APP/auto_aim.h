@@ -19,10 +19,6 @@
 #define AUTO_AIM_BALLISTIC_DISTANCE_M 3.9f
 #define AUTO_AIM_MM_PER_M 1000.0f
 
-#ifndef AUTO_AIM_SOFT_ENABLE
-#define AUTO_AIM_SOFT_ENABLE 0
-#endif
-
 typedef enum
 {
     AIM_OFF = 0x00U,

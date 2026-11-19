@@ -52,7 +52,9 @@ void chassis_behaviour_mode_set(chassis_move_t *chassis_move_mode)
 	switch (gimbal_total_mode_get())
 	{
 	case GIMBAL_TOTAL_FOLLOW:
-		chassis_behaviour_mode = CHASSIS_FOLLOW_GIMBAL_YAW;
+		chassis_behaviour_mode = (!gimbal_roll_is_lifted() &&
+		                          !gimbal_roll_motion_is_active()) ?
+		                         CHASSIS_YAW_HOLD : CHASSIS_FOLLOW_GIMBAL_YAW;
 		break;
 	case GIMBAL_TOTAL_SPIN:
 		chassis_behaviour_mode = CHASSIS_SPIN;
@@ -64,6 +66,10 @@ void chassis_behaviour_mode_set(chassis_move_t *chassis_move_mode)
 	default:
 		chassis_behaviour_mode = CHASSIS_NO_MOVE;
 		break;
+	}
+	if (gimbal_roll_safe_yaw_request_is_active())
+	{
+		chassis_behaviour_mode = CHASSIS_NO_MOVE;
 	}
 
 

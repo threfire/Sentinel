@@ -10,6 +10,7 @@
  * CAN2 roll（MIT，0x54）：MIT_MOTOR_MEASURE[2].fdb。
  * CAN2 拨弹（MIT，0x51）：MIT_MOTOR_MEASURE[0].fdb。
  * CAN3 摩擦轮 1~3（M2006+C610，0x201~0x203）：DJI_MOTOR_MEASURE[0]~[2]。
+ * DJI_MOTOR_MEASURE[4]~[7] 镜像 CAN1 底盘 3508 反馈，按 0x205~0x208 对应。
  *
  * MIT 反馈字段：pos 为位置（rad），vel 为角速度（rad/s），tor 为力矩（N·m），
  * state 为电机状态，t_mos/t_motor 为驱动器/电机温度。
@@ -384,6 +385,9 @@ uint8_t fdcan1_receive(hcan_t *hfdcan, uint16_t *rec_id, uint8_t *buf)
 				uint8_t motor_index = (uint8_t)(pRxHeader.Identifier - 0x205U);
 				get_motor_measure(&CHASSIS_MOTOR_MEASURE[motor_index], buf);
 				CHASSIS_MOTOR_MEASURE[motor_index].last_fdb_time = fdb_time;
+				/* DJI_MOTOR_MEASURE[4..7] 镜像保存底盘四个 3508 的反馈，便于统一观测。 */
+				get_motor_measure(&DJI_MOTOR_MEASURE[4U + motor_index], buf);
+				DJI_MOTOR_MEASURE[4U + motor_index].last_fdb_time = fdb_time;
 				detect_hook((uint8_t)(CHASSIS_MOTOR1_TOE + motor_index));
 				break;
 			}

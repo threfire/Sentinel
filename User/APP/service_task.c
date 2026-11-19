@@ -12,6 +12,7 @@
 #include "hwt_imu.h"
 #include "vofa.h"
 #include "flash_log.h"
+#include "ws2812.h"
 #include "task.h"
 service_control_t service_control;
 
@@ -45,13 +46,13 @@ static void service_task(void *pvParameters)
 		hwt_imu_init();
 		flash_log_init();
 		Beep_Play(BEEP_POWER_ON);
+    WS2812_Ctrl(0U, 0U, 0U);
     service_control.service_time = 0;
 
     while (1)
     {
 			
       service_control.service_time += SERVICE_CONTROL_TIME;
-			ws2812_task();
 			Beep_Task();
 			VOFA_ServiceSend();
 			flash_log_service();

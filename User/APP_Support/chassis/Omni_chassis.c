@@ -425,15 +425,7 @@ __attribute__((used)) void chassis_set_contorl(chassis_move_t *chassis_move_cont
 	}
 	else if (chassis_move_control->chassis_mode == CHASSIS_VECTOR_FOLLOW_GIMBAL_YAW)
 	{
-		if (chassis_move_control->spin_exit_transition_active != 0U)
-		{
-			/* 退出过渡期间固定减速到零，暂停跟随外环。 */
-			chassis_move_control->wz_set = 0.0f;
-		}
-		else
-		{
-			chassis_move_control->wz_set = chassis_follow_yaw_control(chassis_move_control, wz_set);
-		}
+		chassis_move_control->wz_set = chassis_follow_yaw_control(chassis_move_control, wz_set);
 
 		chassis_move_control->vx_set = fp32_constrain(vx_set, chassis_move_control->vx_min_speed, chassis_move_control->vx_max_speed);
 		chassis_move_control->vy_set = fp32_constrain(vy_set, chassis_move_control->vy_min_speed, chassis_move_control->vy_max_speed);
@@ -883,9 +875,13 @@ static fp32 chassis_follow_yaw_control(chassis_move_t *chassis_move_follow, fp32
 	                               1u,
 	                               chassis_move_follow->chassis_yaw_set_vel_filtered,
 	                               chassis_move_follow->chassis_yaw_rate_filtered);
-	wz_cmd = pd_out + chassis_wz_speed_pi_calc(chassis_move_follow,
-	                                           pd_out,
-	                                           chassis_move_follow->wz);
+	wz_cmd = pd_out;
+	if (chassis_move_follow->spin_exit_transition_active == 0U)
+	{
+		wz_cmd += chassis_wz_speed_pi_calc(chassis_move_follow,
+		                                       pd_out,
+		                                       chassis_move_follow->wz);
+	}
 	wz_cmd = chassis_limit_abs(wz_cmd, CHASSIS_WZ_MAX_SPEED);
 	if (fabsf(wz_cmd) < CHASSIS_WZ_OUTPUT_DEADBAND)
 	{
@@ -1384,20 +1380,21 @@ __attribute__((used)) void chassis_control_loop(chassis_move_t *chassis_move_con
 		{
 			if (chassis_move_control_loop->spin_exit_transition_active != 0U)
 			{
+				const fp32 target_wz_plan = fp32_constrain(chassis_move_control_loop->wz_set,
+				                                              -CHASSIS_WZ_MAX_SPEED,
+				                                              CHASSIS_WZ_MAX_SPEED);
 				fp32 last_wz_plan = chassis_move_control_loop->wz_plan;
 
-				chassis_move_control_loop->wz_plan *=
-					(1.0f - CHASSIS_SPIN_EXIT_WZ_FILTER_ALPHA);
+				chassis_move_control_loop->wz_plan += chassis_limit_abs(
+					(target_wz_plan - last_wz_plan) * CHASSIS_SPIN_EXIT_WZ_FILTER_ALPHA,
+					CHASSIS_WZ_MAX_ACCEL * CHASSIS_CONTROL_TIME);
 				chassis_move_control_loop->wz_plan_accel =
 					(chassis_move_control_loop->wz_plan - last_wz_plan) / CHASSIS_CONTROL_TIME;
-				if (fabsf(chassis_move_control_loop->wz_plan) <= CHASSIS_SPIN_EXIT_WZ_EPS)
+				if ((fabsf(chassis_move_control_loop->wz_plan - target_wz_plan) <= CHASSIS_SPIN_EXIT_WZ_EPS) &&
+				    (fabsf(chassis_move_control_loop->wz - chassis_move_control_loop->wz_plan) <= CHASSIS_SPIN_EXIT_WZ_EPS))
 				{
-					chassis_move_control_loop->wz_plan = 0.0f;
+					chassis_move_control_loop->wz_plan = target_wz_plan;
 					chassis_move_control_loop->wz_plan_accel = 0.0f;
-				}
-				if ((fabsf(chassis_move_control_loop->wz_plan) <= CHASSIS_SPIN_EXIT_WZ_EPS) &&
-				    (fabsf(chassis_move_control_loop->wz) <= CHASSIS_SPIN_EXIT_WZ_EPS))
-				{
 					chassis_move_control_loop->spin_exit_transition_active = 0U;
 				}
 			}
