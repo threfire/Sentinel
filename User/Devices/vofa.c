@@ -4,7 +4,7 @@
 #include "chassis_task.h"
 #include "gimbal_task.h"
 #include "gimbal_behaviour.h"
-#include "yaw_pitch_direct.h"
+#include "gimbal_control.h"
 #include "shoot_task.h"
 #include "detect_task.h"
 #include "usart.h"
@@ -288,12 +288,12 @@ void VOFA_SendSmallYawDebug(void)
                 (float)gimbal_roll_target_is_lifted(),
                 (float)gimbal_total_mode_get(),
                 (float)gimbal_small_yaw_control_is_allowed(),
-                (float)gimbal_control.small_yaw.control_allowed,
+                (float)gimbal_control.small_yaw.motor.control_allowed,
                 (float)yaw_mode_non_raw,
                 (float)small_yaw_roll_hold,
                 (float)(toe_is_error(DBUS_TOE) == 0U),
                 (float)small_yaw_feedback_ready,
-                gimbal_control.small_yaw.current_cmd_a);
+                gimbal_control.small_yaw.motor.given_current);
 }
 
 void VOFA_SendGimbalAutoSentinelDebug(void)
@@ -303,9 +303,9 @@ void VOFA_SendGimbalAutoSentinelDebug(void)
     /* 自动哨兵正弦跟随：
      * ch0 小 yaw 目标角(rad)，ch1 小 yaw 实际角(rad)，ch2 小 yaw 电流(A)
      * ch3 pitch 目标角(rad)，ch4 pitch 实际角(rad)，ch5 pitch 控制输出(N*m) */
-    VOFA_Send6(gimbal_control.small_yaw.target_rad,
-               gimbal_control.small_yaw.angle_rad,
-               gimbal_control.small_yaw.current_cmd_a,
+    VOFA_Send6(gimbal_control.small_yaw.motor.relative_angle_set,
+               gimbal_control.small_yaw.motor.relative_angle,
+               gimbal_control.small_yaw.motor.given_current,
                pitch->relative_angle_set,
                pitch->relative_angle,
                pitch->current_set);

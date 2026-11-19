@@ -1,9 +1,11 @@
 /**
   * @file       gimbal_behaviour.c
   * @brief      云台行为模式控制
-  * @note       将遥控器、键鼠、自瞄和初始化状态转换为云台行为模式与角度增量。
+  * @note       将遥控器、自瞄和 roll 状态转换为模式、目标来源、安全姿态与扫描目标。
   */
 #include "gimbal_behaviour.h"
+#include "auto_aim.h"
+#include "target_curve.h"
 #include "bsp_fdcan.h"
 #include "detect_task.h"
 #include "user_lib.h"
@@ -725,4 +727,215 @@ void gimbal_spin_control(float *yaw, float *pitch, gimbal_control_t *control)
     gimbal_read_manual_input(&manual_yaw, &manual_pitch, control);
     *yaw = manual_yaw;
     *pitch = manual_pitch;
+}
+
+/* 行为目标：切换过渡、目标来源选择和扫描跟踪。 */
+
+/**
+ * @brief 处理跟随航向初始化与 roll 抬升后的 pitch 目标过渡。
+ */
+void gimbal_target_transit(gimbal_control_t *control)
+{
+    if (control == NULL)
+    {
+        return;
+    }
+    gimbal_motor_t *yaw_motor = &control->gimbal_yaw_motor;
+    gimbal_motor_t *pitch_motor = &control->gimbal_pitch_motor;
+    gimbal_target_state_t *target = &control->target;
+    const uint8_t auto_enable = (uint8_t)(gimbal_behaviour == GIMBAL_AUTO_SENTINEL && auto_aim_is_active());
+
+    if ((gimbal_behaviour != GIMBAL_RELATIVE_ANGLE) || (gimbal_roll_is_lifted() == 0u))
+    {
+        target->follow_origin_init = 0u;
+    }
+    else if (target->follow_origin_init == 0u)
+    {
+        const float chassis_yaw = yaw_motor->absolute_angle - yaw_motor->relative_angle_unwrapped;
+        yaw_motor->rc_absolute_angle_set = (target->last_behaviour == GIMBAL_SPIN || target->last_behaviour == GIMBAL_AUTO_SENTINEL || target->last_behaviour == GIMBAL_DEBUG) ? yaw_motor->absolute_angle : chassis_yaw;
+        yaw_motor->auto_absolute_angle_set = yaw_motor->rc_absolute_angle_set;
+        if (target->last_behaviour == GIMBAL_SPIN || target->last_behaviour == GIMBAL_AUTO_SENTINEL || target->last_behaviour == GIMBAL_DEBUG)
+        {
+            gimbal_feedforward_clear(yaw_motor);
+        }
+        target->follow_origin_init = 1u;
+    }
+    target->last_behaviour = gimbal_behaviour;
+
+    if (gimbal_roll_motion_is_active())
+    {
+        target->pitch_lift_mid_pending = (uint8_t)gimbal_roll_target_is_lifted();
+    }
+    else if (!gimbal_roll_is_lifted())
+    {
+        target->pitch_lift_mid_pending = 0U;
+    }
+    if (gimbal_feedback_ready(GIMBAL_AXIS_PITCH) && pitch_motor->mode == GIMBAL_MOTOR_ENCODE)
+    {
+        if (auto_enable && !pitch_motor->auto_control_enable)
+        {
+            pitch_motor->auto_relative_angle_set = pitch_motor->relative_angle;
+            gimbal_feedforward_clear_source(pitch_motor, GIMBAL_CONTROL_SOURCE_AUTO);
+        }
+        if (gimbal_roll_motion_is_active())
+        {
+            pitch_motor->rc_relative_angle_set = PITCH_ROLL_SAFE_CONTROL_ANGLE_RAD;
+            pitch_motor->auto_relative_angle_set = PITCH_ROLL_SAFE_CONTROL_ANGLE_RAD;
+        }
+        else if (target->pitch_lift_mid_pending)
+        {
+            pitch_motor->rc_relative_angle_set = PITCH_LIFT_MID_CONTROL_ANGLE_RAD;
+            pitch_motor->auto_relative_angle_set = PITCH_LIFT_MID_CONTROL_ANGLE_RAD;
+            gimbal_feedforward_clear(pitch_motor);
+            target->pitch_lift_mid_pending = 0U;
+        }
+    }
+}
+
+/** @brief 设置单轴 RAW 目标并清除前馈来源。 */
+void gimbal_motor_raw_target(gimbal_motor_t *motor, float add)
+{
+    if (motor == NULL)
+    {
+        return;
+    }
+    if (motor->axis == GIMBAL_AXIS_YAW || motor->axis == GIMBAL_AXIS_PITCH)
+    {
+        auto_aim_reset_delta_accum();
+    }
+    gimbal_feedforward_clear(motor);
+    motor->rc_control_enable = 0U;
+    motor->auto_control_enable = 0U;
+    motor->raw_cmd = add;
+}
+
+/**
+  * @brief          按轴设置编码角目标并执行对应限幅与目标规划
+  * @retval         none
+  */
+void gimbal_relative_angle_limit(gimbal_motor_t *motor, float add)
+{
+    const uint8_t auto_enable = (uint8_t)(gimbal_behaviour == GIMBAL_AUTO_SENTINEL && auto_aim_is_active());
+    const uint8_t rc_enable = (uint8_t)(!auto_enable || add != 0.0f);
+    float rc_relative_angle_set;
+    float desired_relative_angle;
+    float auto_relative_angle_set;
+    const float control_dt = (float)GIMBAL_CONTROL_TIME * 0.001f;
+
+    if (motor == NULL)
+    {
+        return;
+    }
+
+    if (motor->axis != GIMBAL_AXIS_PITCH)
+    {
+        motor->rc_control_enable = 0U;
+        motor->auto_control_enable = 0U;
+        motor->relative_angle_set = add;
+        motor->rc_relative_angle_set = add;
+        motor->auto_relative_angle_set = add;
+        gimbal_feedforward_clear(motor);
+        return;
+    }
+    motor->rc_control_enable = rc_enable;
+    motor->auto_control_enable = auto_enable;
+
+    if (rc_enable != 0u)
+    {
+        rc_relative_angle_set = motor->rc_relative_angle_set + add;
+    }
+    else
+    {
+        rc_relative_angle_set = motor->relative_angle;
+        gimbal_feedforward_clear_source(motor, GIMBAL_CONTROL_SOURCE_RC);
+    }
+
+    motor->rc_relative_angle_set = fp32_constrain(rc_relative_angle_set, motor->min_relative_angle, motor->max_relative_angle);
+    motor->rc_absolute_angle_set = motor->rc_relative_angle_set;
+
+    if (auto_enable != 0u)
+    {
+        desired_relative_angle = motor->relative_angle + auto_aim_get_pitch_err_rad();
+        desired_relative_angle = fp32_constrain(desired_relative_angle, motor->min_relative_angle, motor->max_relative_angle);
+        auto_relative_angle_set = TargetCurve_PlanAngle(motor->auto_relative_angle_set, desired_relative_angle, &motor->auto_target_vel, GIMBAL_AUTO_AIM_PITCH_KP, GIMBAL_AUTO_AIM_PITCH_MAX_SPEED, GIMBAL_AUTO_AIM_PITCH_MAX_ACCEL, control_dt);
+        motor->auto_relative_angle_set = fp32_constrain(auto_relative_angle_set, motor->min_relative_angle, motor->max_relative_angle);
+    }
+    else
+    {
+        motor->auto_relative_angle_set = motor->rc_relative_angle_set;
+    }
+
+    motor->auto_absolute_angle_set = motor->auto_relative_angle_set;
+    motor->relative_angle_set = motor->rc_relative_angle_set + ((auto_enable != 0u) ? (motor->auto_relative_angle_set - motor->relative_angle) : 0.0f);
+    motor->absolute_angle_set = motor->relative_angle_set;
+    if (rc_enable)
+    {
+        gimbal_feedforward_track_target(motor, motor->rc_relative_angle_set, GIMBAL_CONTROL_SOURCE_RC);
+    }
+    gimbal_feedforward_track_target(motor, motor->auto_relative_angle_set, GIMBAL_CONTROL_SOURCE_AUTO);
+}
+
+/** @brief 在目标层生成正弦扫描或视觉跟踪目标。 */
+void gimbal_scan_target_update(gimbal_control_t *control)
+{
+    if (control == NULL)
+    {
+        return;
+    }
+    gimbal_target_state_t *target = &control->target;
+    gimbal_motor_t *small = &control->small_yaw.motor;
+    const uint8_t auto_enable = (uint8_t)(gimbal_behaviour == GIMBAL_AUTO_SENTINEL && auto_aim_is_active());
+    const uint8_t scan_allowed = (uint8_t)(!gimbal_roll_safe_yaw_request_is_active() && !gimbal_roll_motion_is_active() && gimbal_feedback_ready(GIMBAL_AXIS_PITCH));
+    const uint8_t scan_enable = (uint8_t)(scan_allowed && (gimbal_behaviour == GIMBAL_DEBUG || (gimbal_behaviour == GIMBAL_AUTO_SENTINEL && !auto_enable)));
+    const uint32_t now_ms = HAL_GetTick();
+    uint32_t elapsed_ms;
+    float blend;
+    float small_yaw_sine_value;
+    float pitch_sine_value;
+    gimbal_motor_t *pitch_motor;
+
+    if (!scan_enable)
+    {
+        target->scan_active = 0U;
+        if (scan_allowed && auto_enable)
+        {
+            small->relative_angle_set = fp32_constrain( small->relative_angle + auto_aim_get_yaw_err_rad(), -SMALL_YAW_SCAN_LIMIT_RAD, SMALL_YAW_SCAN_LIMIT_RAD);
+        }
+        return;
+    }
+
+    pitch_motor = &control->gimbal_pitch_motor;
+    if (target->scan_active == 0u)
+    {
+        target->scan_start_tick = now_ms;
+        target->small_yaw_start_rad = small->relative_angle;
+        target->pitch_start_rad = pitch_motor->relative_angle;
+        gimbal_feedforward_clear(pitch_motor);
+        target->scan_active = 1u;
+    }
+
+    elapsed_ms = now_ms - target->scan_start_tick;
+    blend = fp32_constrain((float)elapsed_ms / (float)GIMBAL_DEBUG_SINE_ENTRY_MS, 0.0f, 1.0f);
+    blend = blend * blend * (3.0f - 2.0f * blend);
+    small_yaw_sine_value = sinf(2.0f * GIMBAL_PI * (float)(elapsed_ms % SMALL_YAW_DEBUG_SINE_PERIOD_MS) / (float)SMALL_YAW_DEBUG_SINE_PERIOD_MS);
+    pitch_sine_value = sinf(2.0f * GIMBAL_PI * (float)(elapsed_ms % PITCH_DEBUG_SINE_PERIOD_MS) / (float)PITCH_DEBUG_SINE_PERIOD_MS);
+
+#if (GIMBAL_DEBUG_SMALL_YAW_SINE_ENABLE != 0U)
+    small->relative_angle_set = target->small_yaw_start_rad + blend * (SMALL_YAW_SCAN_LIMIT_RAD * small_yaw_sine_value - target->small_yaw_start_rad);
+#endif
+
+#if (GIMBAL_DEBUG_PITCH_SINE_ENABLE != 0U)
+    {
+        const float pitch_raw_target = PITCH_DEBUG_SINE_LOWER_ANGLE_RAD + 0.5f * (PITCH_DEBUG_SINE_UPPER_ANGLE_RAD - PITCH_DEBUG_SINE_LOWER_ANGLE_RAD) * (1.0f + pitch_sine_value);
+        const float pitch_sine_target = fp32_constrain( PITCH_FEEDBACK_SIGN * pitch_raw_target + PITCH_FEEDBACK_OFFSET_RAD, pitch_motor->min_relative_angle, pitch_motor->max_relative_angle);
+        const float pitch_angle = target->pitch_start_rad + blend * (pitch_sine_target - target->pitch_start_rad);
+
+        pitch_motor->rc_relative_angle_set = pitch_angle;
+        pitch_motor->auto_relative_angle_set = pitch_angle;
+        pitch_motor->relative_angle_set = pitch_angle;
+        pitch_motor->absolute_angle_set = pitch_angle;
+    }
+#else
+    (void)pitch_motor;
+#endif
 }

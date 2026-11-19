@@ -1457,24 +1457,14 @@
               <FilePath>..\User\APP_Support\gimbal\gimbal_behaviour.h</FilePath>
             </File>
             <File>
-              <FileName>target_curve.c</FileName>
+              <FileName>gimbal_control.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\User\APP_Support\gimbal\target_curve.c</FilePath>
+              <FilePath>..\User\APP_Support\gimbal\gimbal_control.c</FilePath>
             </File>
             <File>
-              <FileName>target_curve.h</FileName>
+              <FileName>gimbal_control.h</FileName>
               <FileType>5</FileType>
-              <FilePath>..\User\APP_Support\gimbal\target_curve.h</FilePath>
-            </File>
-            <File>
-              <FileName>yaw_pitch_direct.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\User\APP_Support\gimbal\yaw_pitch_direct.c</FilePath>
-            </File>
-            <File>
-              <FileName>yaw_pitch_direct.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\User\APP_Support\gimbal\yaw_pitch_direct.h</FilePath>
+              <FilePath>..\User\APP_Support\gimbal\gimbal_control.h</FilePath>
             </File>
           </Files>
         </Group>
@@ -1670,6 +1660,16 @@
               <FileName>user_lib.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\User\Algorithm\user_lib.h</FilePath>
+            </File>
+            <File>
+              <FileName>target_curve.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\Algorithm\target_curve.c</FilePath>
+            </File>
+            <File>
+              <FileName>target_curve.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\User\Algorithm\target_curve.h</FilePath>
             </File>
           </Files>
         </Group>

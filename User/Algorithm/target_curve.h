@@ -1,20 +1,20 @@
 /**
   * @file       target_curve.h
-  * @brief      云台目标曲线生成器接口
+  * @brief      通用目标曲线生成器接口
   * @note       提供常值、三角函数、周期波形、阶跃、斜坡和手动 S 型速度曲线。
   */
 #ifndef TARGET_CURVE_H
 #define TARGET_CURVE_H
 
 #include <stdint.h>
-#include "robot_param.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+/** @brief 目标曲线使用的圆周率常量。 */
 #ifndef TARGET_PI
-#define TARGET_PI PI
+#define TARGET_PI 3.14159265358979323846f
 #endif
 
 typedef enum
@@ -394,6 +394,19 @@ float TargetCurve_GetVelocity(const TargetCurve_t *obj);
   * @retval         当前加速度输出
   */
 float TargetCurve_GetAcceleration(const TargetCurve_t *obj);
+
+/**
+  * @brief 按速度与加速度上限推进角度目标。
+  * @param target_set 当前目标角，rad。
+  * @param desired_target 期望目标角，rad。
+  * @param target_vel 输入输出：规划速度，rad/s。
+  * @param kp 角度误差到规划速度的增益，1/s。
+  * @param max_speed 速度上限，rad/s。
+  * @param max_accel 加速度上限，rad/s^2。
+  * @param dt 控制周期，s。
+  * @return 更新后的目标角，rad。
+  */
+float TargetCurve_PlanAngle(float target_set, float desired_target, float *target_vel, float kp, float max_speed, float max_accel, float dt);
 
 #ifdef __cplusplus
 }

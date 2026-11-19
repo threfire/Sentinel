@@ -1,6 +1,6 @@
 /**
   * @file       shoot.h
-  * @brief      3508 发射控制接口声明
+  * @brief      M2006/C610 摩擦轮发射控制接口声明
   * @note       声明发射模块初始化和周期控制接口。
   */
 #ifndef SHOOT_H

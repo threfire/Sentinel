@@ -145,4 +145,17 @@ void gimbal_motionless_control(float *yaw, float *pitch, gimbal_control_t *contr
   */
 void gimbal_spin_control(float *yaw, float *pitch, gimbal_control_t *control);
 
+
+/** @brief 按行为切换初始化航向和 pitch 目标，处理 roll 抬升后中位请求。 */
+void gimbal_target_transit(gimbal_control_t *control);
+
+/** @brief 设置当前轴 RAW 输入并清除遥控、自瞄来源历史。 */
+void gimbal_motor_raw_target(gimbal_motor_t *motor, float add);
+
+/** @brief 按轴选择编码角目标来源并执行限幅，角度单位 rad。 */
+void gimbal_relative_angle_limit(gimbal_motor_t *motor, float add);
+
+/** @brief 根据扫描或自瞄状态更新小 yaw、pitch 目标，角度单位 rad。 */
+void gimbal_scan_target_update(gimbal_control_t *control);
+
 #endif

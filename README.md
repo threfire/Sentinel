@@ -92,8 +92,7 @@
 │   │   │   └── struct_typedef.h            # 基础类型定义
 │   │   ├── gimbal/
 │   │   │   ├── gimbal_behaviour.c / *.h    # 云台行为状态机
-│   │   │   ├── yaw_pitch_direct.c / *.h    # yaw/pitch 反馈、目标和 MIT 下发链路
-│   │   │   └── target_curve.c / *.h        # 云台目标曲线工具
+│   │   │   └── gimbal_control.c / *.h     # 大小 yaw、pitch、roll 四轴控制
 │   │   ├── chassis/
 │   │   │   ├── Omni_chassis.c / *.h        # 底盘执行层、速度规划、轮速控制、制动补偿
 │   │   │   ├── chassis_behaviour.c / *.h   # 底盘行为状态机
@@ -596,8 +595,11 @@ flash_log_enqueue_error()
 - `User/APP_Support/chassis/chassis_behaviour.*` 负责遥控器、键鼠、掉线状态到底盘行为模式和底盘控制模式的映射。
 - `User/APP_Support/chassis/chassis_calculate.*` 负责底盘运动学正解、逆解、坐标旋转和运动学限幅。
 - `User/APP_Support/chassis/Omni_chassis.*` 负责底盘初始化、反馈更新、目标生成、速度规划、轮速控制、制动补偿和 CAN 发送。
-- `User/APP_Support/gimbal/gimbal_behaviour.*` 负责云台行为模式映射。
-- `User/APP_Support/gimbal/yaw_pitch_direct.*` 负责大小 yaw、pitch、roll 反馈、目标生成及 MIT/GM6020 输出。
+- `User/APP/gimbal_task.*` 同时提供四轴公共运算：反馈组装、切换初始化、PID、前馈与摩擦补偿、MIT 位置命令计算。
+- `User/APP_Support/gimbal/gimbal_behaviour.*` 负责行为模式、目标来源选择、roll 安全姿态、扫描与自瞄目标过渡。
+- `User/APP_Support/gimbal/gimbal_control.*` 仅保留四轴初始化、模式、过渡、反馈、目标、控制和发送七个阶段入口。
+- `User/Algorithm/target_curve.*` 负责目标曲线与速度、加速度受限的角度规划。
+- 四轴公共控制状态分别位于 `gimbal_control.gimbal_yaw_motor`、`gimbal_control.small_yaw.motor`、`gimbal_control.gimbal_pitch_motor`、`gimbal_control.roll`；各轴通过 `mode`、`control_allowed`、`relative_angle`、`relative_angle_set` 和 `given_current` 观察模式、许可、反馈、目标与输出，小 yaw 输出单位为 A，大 yaw 与 pitch 为 N·m，roll 的完整位置命令位于 `position_cmd`。
 - `User/APP_Support/shoot/shoot.*` 负责 M2006/C610 摩擦轮和 MIT 拨弹机构控制。
 - `User/APP_Support/power_control/*` 负责底盘功率预测、功率限幅、电流缩放和功率模块通信。
 - `User/BSP/*` 负责板级外设封装、CAN/UART/TIM/DWT 和遥控器底层数据。

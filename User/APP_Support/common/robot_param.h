@@ -86,6 +86,12 @@ extern "C" {
 #define GIMBAL_PITCH_STATIC_FRICTION_FULLBAND     0.008f
 #define GIMBAL_PITCH_STATIC_FRICTION_FILTER_ALPHA 0.1f
 
+/* pitch 自瞄目标规划与反馈时效 */
+#define GIMBAL_AUTO_AIM_PITCH_KP            9.0f    // 目标角误差到规划速度的增益，1/s
+#define GIMBAL_AUTO_AIM_PITCH_MAX_SPEED     (720.0f * GIMBAL_PI / 180.0f) // 规划速度上限，rad/s
+#define GIMBAL_AUTO_AIM_PITCH_MAX_ACCEL     (5100.0f * GIMBAL_PI / 180.0f) // 规划加速度上限，rad/s^2
+#define GIMBAL_PITCH_MIT_FDB_TIMEOUT        100U    // pitch MIT 反馈有效时长，ms
+
 /* 小 yaw GM6020 双环 PID 与电流限幅 */
 #define SMALL_YAW_6020_CURRENT_LIMIT_A    3.0f
 #define SMALL_YAW_ANGLE_PID_KP            5.60f

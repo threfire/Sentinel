@@ -147,6 +147,10 @@ static void PID_Calc_Jump(chassis_move_t *chassis_pid_calc);
   */
 static void chassis_dynamic_current_limit_update(chassis_move_t *chassis_move_limit);
 /**
+  * @brief          根据规划车速生成四轮电流并执行功率处理
+  */
+static void chassis_wheel_control_update(chassis_move_t *chassis_move_control);
+/**
   * @brief          执行底盘速度规划、前馈、速度环和电流限幅
   * @retval         none
   */
@@ -1323,9 +1327,6 @@ static void chassis_dynamic_current_limit_update(chassis_move_t *chassis_move_li
   */
 __attribute__((used)) void chassis_control_loop(chassis_move_t *chassis_move_control_loop)
 {
-	fp32 wheel_speed[CHASSIS_MODULE_NUM] = {0.0f};
-	fp32 wheel_angle[CHASSIS_MODULE_NUM] = {0.0f};
-	uint8_t i;
 	uint8_t zero_speed_cmd;
 
 	if (chassis_move_control_loop == NULL) return;
@@ -1425,6 +1426,17 @@ __attribute__((used)) void chassis_control_loop(chassis_move_t *chassis_move_con
 		chassis_body_feedforward_update(chassis_move_control_loop);
 	}
 	chassis_body_velocity_brake_update(chassis_move_control_loop);
+	chassis_wheel_control_update(chassis_move_control_loop);
+}
+
+/**
+  * @brief          将规划车速转换为四轮电流，依次执行打滑、速度环、限流和功率处理
+  */
+static void chassis_wheel_control_update(chassis_move_t *chassis_move_control_loop)
+{
+	fp32 wheel_speed[CHASSIS_MODULE_NUM] = {0.0f};
+	fp32 wheel_angle[CHASSIS_MODULE_NUM] = {0.0f};
+	uint8_t i;
 
 	chas_inv_cal(chassis_move_control_loop->vx_plan,
 	             chassis_move_control_loop->vy_plan,

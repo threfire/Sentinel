@@ -1,6 +1,6 @@
 /**
   * @file       target_curve.c
-  * @brief      云台目标曲线生成器
+  * @brief      通用目标曲线生成器
   * @note       实现常值、三角函数、周期波形、阶跃、斜坡和手动 S 型速度曲线。
   */
 #include "target_curve.h"
@@ -978,4 +978,37 @@ float TargetCurve_GetAcceleration(const TargetCurve_t *obj)
     }
 
     return obj->state.acceleration;
+}
+
+/**
+  * @brief          按速度与加速度上限规划目标角，角度单位 rad
+  * @retval         none
+  */
+float TargetCurve_PlanAngle(float target_set, float desired_target, float *target_vel, float kp, float max_speed, float max_accel, float dt)
+{
+    float err;
+    float vel_cmd;
+    float vel_delta;
+    float vel_delta_max;
+    float step;
+
+    if (target_vel == 0 || dt <= 0.0f)
+    {
+        return target_set;
+    }
+
+    err = desired_target - target_set;
+    vel_cmd = TargetCurve_Clamp(kp * err, -max_speed, max_speed);
+    vel_delta_max = max_accel * dt;
+    vel_delta = TargetCurve_Clamp(vel_cmd - *target_vel, -vel_delta_max, vel_delta_max);
+    *target_vel += vel_delta;
+
+    step = *target_vel * dt;
+    if ((err > 0.0f && step > err) || (err < 0.0f && step < err))
+    {
+        step = err;
+        *target_vel = 0.0f;
+    }
+
+    return target_set + step;
 }
