@@ -94,7 +94,8 @@
 │   │   │   ├── gimbal_behaviour.c / *.h    # 云台行为状态机
 │   │   │   └── gimbal_control.c / *.h     # 大小 yaw、pitch、roll 四轴控制
 │   │   ├── chassis/
-│   │   │   ├── Omni_chassis.c / *.h        # 底盘执行层、速度规划、轮速控制、制动补偿
+│   │   │   ├── Omni_chassis.c / *.h        # 底盘七个主体阶段入口
+│   │   │   ├── chassis_control.c / *.h     # 航向闭环、速度规划、轮速控制和电流限幅
 │   │   │   ├── chassis_behaviour.c / *.h   # 底盘行为状态机
 │   │   │   └── chassis_calculate.c / *.h   # 底盘运动学正解/逆解和坐标转换
 │   │   ├── shoot/
@@ -594,7 +595,7 @@ flash_log_enqueue_error()
 - `User/APP_Support/common/flash_log.*` 负责 W25Q64 日志区扫描、错误事件入队、周期落盘、串口导出和日志区清除。
 - `User/APP_Support/chassis/chassis_behaviour.*` 负责遥控器、键鼠、掉线状态到底盘行为模式和底盘控制模式的映射。
 - `User/APP_Support/chassis/chassis_calculate.*` 负责底盘运动学正解、逆解、坐标旋转和运动学限幅。
-- `User/APP_Support/chassis/Omni_chassis.*` 负责底盘初始化、反馈更新、目标生成、速度规划、轮速控制、制动补偿和 CAN 发送。
+- `User/APP_Support/chassis/Omni_chassis.*` 负责底盘七个主体阶段入口；`chassis_control.*` 负责反馈辅助、航向闭环、速度规划、轮速控制和电流限幅。
 - `User/APP/gimbal_task.*` 同时提供四轴公共运算：反馈组装、切换初始化、PID、前馈与摩擦补偿、MIT 位置命令计算。
 - `User/APP_Support/gimbal/gimbal_behaviour.*` 负责行为模式、目标来源选择、roll 安全姿态、扫描与自瞄目标过渡。
 - `User/APP_Support/gimbal/gimbal_control.*` 仅保留四轴初始化、模式、过渡、反馈、目标、控制和发送七个阶段入口。

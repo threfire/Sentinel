@@ -1406,6 +1406,16 @@
               <FileType>5</FileType>
               <FilePath>..\User\APP_Support\chassis\Omni_chassis.h</FilePath>
             </File>
+            <File>
+              <FileName>chassis_control.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\APP_Support\chassis\chassis_control.c</FilePath>
+            </File>
+            <File>
+              <FileName>chassis_control.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\User\APP_Support\chassis\chassis_control.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

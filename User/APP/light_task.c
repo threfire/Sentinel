@@ -343,7 +343,6 @@ static void light_render_chassis_status(void)
             light_set_pixel(LIGHT_CHASSIS_MODE_LED, LIGHT_LOW, 0U, LIGHT_MID);
             break;
 
-        case CHASSIS_RETURN:
         default:
             light_set_pixel(LIGHT_CHASSIS_MODE_LED, LIGHT_MID, LIGHT_MID, 0U);
             break;

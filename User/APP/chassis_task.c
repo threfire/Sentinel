@@ -4,6 +4,7 @@
   * @note       串联底盘模式、反馈、控制、发送的周期任务链路。
   */
 #include "chassis_task.h"
+#include "Omni_chassis.h"
 #include "FreeRTOS.h"
 #include "cmsis_os.h"
 #include "task.h"

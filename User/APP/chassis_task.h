@@ -38,22 +38,13 @@ typedef enum
 typedef struct
 {
     const motor_measure_t *chassis_motor_measure;
-    fp32 accel;
     fp32 speed;
     fp32 speed_filtered;
     fp32 speed_rad_s;
     fp32 speed_set;
-    fp32 angle;
     int16_t give_current;
     fp32 given_current_a;
 } chassis_motor_t;
-
-typedef struct
-{
-    fp32 now[CHASSIS_MODULE_NUM];
-    fp32 last[CHASSIS_MODULE_NUM];
-    fp32 initial[CHASSIS_MODULE_NUM];
-} wheel_angle_offset_t;
 
 typedef struct
 {
@@ -83,7 +74,6 @@ typedef struct
     uint8_t spin_exit_transition_active; /**< 小陀螺退出过渡状态，1 表示正在平滑减速。 */
 
     chassis_motor_t chassis_3508[CHASSIS_MODULE_NUM];
-    wheel_angle_offset_t wheel_angle_offset;
     chassis_odometer_t odometer;
 
     fp32 model_3508_out[CHASSIS_MODULE_NUM];
@@ -105,9 +95,6 @@ typedef struct
     fp32 vx_set;
     fp32 vy_set;
     fp32 wz_set;
-    fp32 last_vx_set;
-    fp32 last_vy_set;
-    fp32 last_wz_set;
     fp32 vx_plan;
     fp32 vy_plan;
     fp32 wz_plan;
@@ -157,51 +144,8 @@ typedef struct
   */
 extern void chassis_task(void *pvParameters);
 
-/**
-  * @brief          初始化底盘控制结构体
-  * @retval         none
-  */
-void chassis_init(chassis_move_t *chassis_move_init);
-
-/**
-  * @brief          设置底盘当前模式
-  * @retval         none
-  */
-void chassis_set_mode(chassis_move_t *chassis_move_mode);
-
-/**
-  * @brief          处理底盘模式切换过渡
-  * @retval         none
-  */
-void chassis_mode_change_control_transit(chassis_move_t *chassis_move_transit);
-
-/**
-  * @brief          更新底盘电机和传感器反馈
-  * @retval         none
-  */
-void chassis_feedback_update(chassis_move_t *chassis_move_update);
-
-/**
-  * @brief          生成底盘控制目标量
-  * @retval         none
-  */
-void chassis_set_contorl(chassis_move_t *chassis_move_control);
-
-/**
-  * @brief          执行底盘闭环控制
-  * @retval         none
-  */
-void chassis_control_loop(chassis_move_t *chassis_move_control_loop);
-
-/**
-  * @brief          发送底盘电机命令
-  * @retval         none
-  */
-void chassis_send_cmd(chassis_move_t *chassis_move_send);
-
 void chassis_odometer_can_rx(uint16_t can_id, const uint8_t *data, uint8_t len);
 
 extern chassis_move_t chassis_move;
-extern fp32 yaw_set;
 
 #endif
