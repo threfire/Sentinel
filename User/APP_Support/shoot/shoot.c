@@ -1,6 +1,6 @@
 /**
   * @file       shoot.c
-  * @brief      3508 摩擦轮与 MIT 拨弹控制
+  * @brief      M2006/C610 摩擦轮与 MIT 拨弹控制
   * @note       实现摩擦轮 ADRC 控制、掉速前馈、拨弹力矩控制和在线门控。
   */
 #include "shoot.h"
@@ -26,8 +26,8 @@ static bool shoot_task_strum_online(void);
 static void shoot_task_control_friction(shoot_task_control_t *control);
 static void shoot_task_stop_friction(shoot_task_control_t *control);
 static void shoot_task_control_strum(shoot_task_control_t *control);
+static void shoot_task_send_cmd(shoot_task_control_t *control);
 static void shoot_task_send_friction_current(int16_t fric1_current, int16_t fric2_current, int16_t fric3_current);
-static void shoot_task_send_strum_torque(float torque_nm);
 static void shoot_task_send_strum_mit(float pos, float vel, float kp, float kd, float torque_nm);
 static void shoot_task_motor_init(shoot_task_motor_t *motor,
                                   const motor_measure_t *measure,
@@ -66,10 +66,9 @@ static uint16_t shoot_task_ms_to_ticks(uint16_t ms);
 static float shoot_task_avg3(float a, float b, float c);
 static float shoot_task_max3(float a, float b, float c);
 static float shoot_task_min_float(float a, float b);
-static float shoot_task_clamp_float(float value, float min_value, float max_value);
 
 /**
-  * @brief          初始化 3508 摩擦轮和 MIT 拨弹控制状态
+  * @brief          初始化 M2006/C610 摩擦轮和 MIT 拨弹控制状态
   * @note           发射模块挂在云台任务内运行，初始化函数只建立状态，不做阻塞等待。
   * @retval         none
   */
@@ -101,6 +100,7 @@ __attribute__((used)) void shoot_control_loop(void)
     shoot_task_control_strum(&shoot_task_control);
 
     shoot_task_control.last_mode = shoot_task_control.mode;
+    shoot_task_send_cmd(&shoot_task_control);
 }
 
 
@@ -218,7 +218,7 @@ static bool shoot_task_strum_online(void)
 
 /**
   * @brief          摩擦轮闭环控制
-  * @note           三个摩擦轮均在线且 READY 模式有效时进入 ADRC 控制，离线时发 0 并清前馈状态。
+  * @note           三个摩擦轮均在线且 READY 模式有效时进入 ADRC 控制，离线时清零命令和前馈状态。
   * @param[out]     control: 发射控制结构体指针
   * @retval         none
   */
@@ -339,9 +339,6 @@ static void shoot_task_control_friction(shoot_task_control_t *control)
     shoot_task_motor_update_current_physics(&control->fric2);
     shoot_task_motor_update_current_physics(&control->fric3);
 
-    shoot_task_send_friction_current(control->fric1.give_current,
-                                     control->fric2.give_current,
-                                     control->fric3.give_current);
     shoot_task_update_bullet_speed_estimate(control);
     shoot_task_update_fire_detect(control);
     shoot_task_update_history(control);
@@ -349,7 +346,7 @@ static void shoot_task_control_friction(shoot_task_control_t *control)
 
 /**
   * @brief          摩擦轮零输出
-  * @note           STOP 无力模式调用该函数，清目标、清前馈、清开火检测并发送 0 电流。
+  * @note           STOP 无力模式调用该函数，清目标、前馈和开火检测，并将电流命令置零。
   * @param[out]     control: 发射控制结构体指针
   * @retval         none
   */
@@ -400,12 +397,11 @@ static void shoot_task_stop_friction(shoot_task_control_t *control)
         shoot_task_motor_reset(&control->fric3);
     }
 
-    shoot_task_send_friction_current(0, 0, 0);
 }
 
 /**
   * @brief          拨弹控制
-  * @note           STOP 无力模式和拨弹离线时发送 0 力矩；摩擦轮就绪后允许速度控制。
+  * @note           STOP 无力模式和拨弹离线时生成零力矩命令；摩擦轮就绪后允许速度控制。
   * @param[out]     control: 发射控制结构体指针
   * @retval         none
   */
@@ -443,8 +439,7 @@ static void shoot_task_control_strum(shoot_task_control_t *control)
         strum_measure->set.KP = 0.0f;
         strum_measure->set.KD = 0.0f;
         strum_measure->set.TOR = 0.0f;
-        /* STOP 无力模式和拨弹离线保护只发送 0 力矩，不进入拨弹闭环。 */
-        shoot_task_send_strum_torque(0.0f);
+        /* STOP 无力模式和拨弹离线保护只生成 0 力矩命令。 */
         return;
     }
 
@@ -457,11 +452,6 @@ static void shoot_task_control_strum(shoot_task_control_t *control)
         strum_measure->set.KP = SHOOT_STRUM_SPEED_KP;
         strum_measure->set.KD = SHOOT_STRUM_SPEED_KD;
         strum_measure->set.TOR = SHOOT_STRUM_DIRECTION * SHOOT_STRUM_SPEED_TORQUE_FF_NM;
-        shoot_task_send_strum_mit(strum_measure->set.POS,
-                                  strum_measure->set.VEL,
-                                  strum_measure->set.KP,
-                                  strum_measure->set.KD,
-                                  strum_measure->set.TOR);
         return;
     }
 
@@ -470,7 +460,30 @@ static void shoot_task_control_strum(shoot_task_control_t *control)
     strum_measure->set.KP = 0.0f;
     strum_measure->set.KD = 0.0f;
     strum_measure->set.TOR = 0.0f;
-    shoot_task_send_strum_mit(strum_measure->set.POS, 0.0f, 0.0f, 0.0f, 0.0f);
+}
+
+/**
+ * @brief 发送本周期摩擦轮电流与拨弹 MIT 命令。
+ * @param control 发射控制状态和本周期命令。
+ */
+static void shoot_task_send_cmd(shoot_task_control_t *control)
+{
+    const MITMeasure_t *strum_measure;
+
+    shoot_task_send_friction_current(control->fric1.give_current,
+                                     control->fric2.give_current,
+                                     control->fric3.give_current);
+    if (control->rc == NULL)
+    {
+        return;
+    }
+
+    strum_measure = &MIT_MOTOR_MEASURE[SHOOT_STRUM_MIT_INDEX];
+    shoot_task_send_strum_mit(strum_measure->set.POS,
+                              strum_measure->set.VEL,
+                              strum_measure->set.KP,
+                              strum_measure->set.KD,
+                              strum_measure->set.TOR);
 }
 
 /**
@@ -501,17 +514,6 @@ static void shoot_task_send_friction_current(int16_t fric1_current, int16_t fric
     shoot_task_control.friction_can_cmd[2] = fric3_cmd;
     shoot_task_control.friction_can_send_status =
         canx_send_data(&hfdcan3, SHOOT_FRICTION_CMD_ID, data, 8U);
-}
-
-/**
-  * @brief          发送拨弹 MIT 力矩命令
-  * @param[in]      torque_nm: 拨弹输入力矩命令，单位 N*m
-  * @retval         none
-  */
-static void shoot_task_send_strum_torque(float torque_nm)
-{
-    torque_nm = shoot_task_clamp_float(torque_nm, T_MIN, T_MAX);
-    CAN_cmd_MIT(&hfdcan2, DM_STRUM_CAN_ID, 0.0f, 0.0f, 0.0f, 0.0f, torque_nm);
 }
 
 static void shoot_task_send_strum_mit(float pos, float vel, float kp, float kd, float torque_nm)
@@ -1047,20 +1049,6 @@ static bool shoot_task_fire_heat_would_over_limit(const shoot_task_control_t *co
 static float shoot_task_min_float(float a, float b)
 {
     return (a < b) ? a : b;
-}
-
-static float shoot_task_clamp_float(float value, float min_value, float max_value)
-{
-    if (value < min_value)
-    {
-        value = min_value;
-    }
-    else if (value > max_value)
-    {
-        value = max_value;
-    }
-
-    return value;
 }
 
 static bool shoot_task_motor_ready(const shoot_task_motor_t *motor, uint32_t now)

@@ -30,11 +30,9 @@ typedef enum
 	CHASSIS_FOLLOW_GIMBAL_YAW,			//底盘跟随云台yaw角度
 	CHASSIS_YAW_HOLD,							//底盘yaw目标角闭环
 	CHASSIS_SPIN,										//旋转模式
-	CHASSIS_RETURN,									//底盘回正
 	
 } chassis_behaviour_e;
 
-#define CHASSIS_OPEN_RC_SCALE 10		//在 CHASSIS_OPEN 模式下, 遥控器乘以该比例发送到can上
 
 
 //根据遥控器输入设置底盘行为模式

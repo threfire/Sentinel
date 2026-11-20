@@ -90,12 +90,7 @@ void chassis_behaviour_mode_set(chassis_move_t *chassis_move_mode)
 	{
 		chassis_move_mode->chassis_mode = CHASSIS_VECTOR_SPIN;	// 模式说明
 	}
-//	else if (chassis_behaviour_mode == CHASSIS_RETURN)
-//	{
-//	}
-
 	{
-// 预留底盘回正模式。
 		static bool pressed_Q = false, last_pressed_Q = false;
 		pressed_Q = (chassis_move_mode->chassis_RC->key.v & KEY_PRESSED_OFFSET_Q);
 		if(pressed_Q && !last_pressed_Q && super_cap_mode >= SUPER_CAP_PREPARED)
@@ -149,7 +144,6 @@ static void chassis_no_move_control(fp32 *vx_set, fp32 *vy_set, fp32 *wz_set, ch
     *wz_set = 0.0f;
 }
 
-// 预留底盘回正模式。
 fp32 chassis_wz_rc_sen = CHASSIS_WZ_RC_SEN;
 
 /**

@@ -12,10 +12,6 @@
 #define PID_USUAL PID_POSITION
 #endif
 
-#ifndef PID_calc
-#define PID_calc PID_Calc
-#endif
-
 /**
   * @brief          初始化底盘控制结构体和控制器状态
   * @retval         none
